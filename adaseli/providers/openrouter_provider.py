@@ -20,6 +20,18 @@ def _base():
     return os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
 
 
+def key_hint():
+    """Return a clarifying hint if OPENROUTER_API_KEY looks like the wrong kind of
+    key (e.g. an Anthropic `sk-ant-...` key pasted into the wrong variable), else ''."""
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    if key and not key.startswith("sk-or-"):
+        kind = "an Anthropic" if key.startswith("sk-ant-") else "a non-OpenRouter"
+        return ("OPENROUTER_API_KEY looks like %s key. OpenRouter keys start with "
+                "'sk-or-v1-' (get one at https://openrouter.ai/keys). If you meant to "
+                "use that key, run with --provider anthropic instead." % kind)
+    return ""
+
+
 def _headers():
     key = os.environ.get("OPENROUTER_API_KEY", "")
     return {
@@ -57,6 +69,9 @@ def openrouter_step(model, system, messages, tools, max_tokens):
             detail = " — " + e.response.text[:300]
         except Exception:
             pass
+        hint = key_hint()
+        if hint:
+            detail += " [%s]" % hint
         return {"text": "", "tool_calls": [], "raw": None,
                 "error": "openrouter request failed: %s%s" % (e, detail)}
 
@@ -111,8 +126,9 @@ def check_openrouter(model=None):
             detail = " — " + e.response.text[:200]
         except Exception:
             pass
-        return {"ok": False, "base_url": base, "error": "%s%s" % (e, detail),
-                "hint": "Check the key is valid and OPENROUTER_API_KEY is exported."}
+        # A wrong-kind key is the most common cause of a 401 here.
+        hint = key_hint() or "Check the key is valid and OPENROUTER_API_KEY is exported."
+        return {"ok": False, "base_url": base, "error": "%s%s" % (e, detail), "hint": hint}
 
 
 def list_models(name_filter=None, free_only=False, tools_only=False):

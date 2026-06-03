@@ -164,11 +164,16 @@ def _require_key(provider):
                     "(or use --provider ollama/openrouter, or the selftest command)",
                     fg=typer.colors.RED)
         raise typer.Exit(1)
-    if provider is Provider.openrouter and not os.environ.get("OPENROUTER_API_KEY"):
-        typer.secho("error: OPENROUTER_API_KEY is not set "
-                    "(export it, e.g. `export OPENROUTER_API_KEY=sk-or-v1-...`)",
-                    fg=typer.colors.RED)
-        raise typer.Exit(1)
+    if provider is Provider.openrouter:
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            typer.secho("error: OPENROUTER_API_KEY is not set "
+                        "(export it, e.g. `export OPENROUTER_API_KEY=sk-or-v1-...`)",
+                        fg=typer.colors.RED)
+            raise typer.Exit(1)
+        warn = providers.openrouter_key_hint()
+        if warn:
+            typer.secho("error: " + warn, fg=typer.colors.RED)
+            raise typer.Exit(1)
 
 
 def main():
