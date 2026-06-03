@@ -52,7 +52,7 @@ def research(
     question: Optional[str] = typer.Option(
         None, "--question", "-q",
         help="a specific question for the report agent to answer about the gene"),
-    provider: Provider = typer.Option(Provider.anthropic, "--provider", help="LLM backend"),
+    provider: Provider = typer.Option(Provider.openrouter, "--provider", help="LLM backend"),
     model: Optional[str] = typer.Option(None, "--model", help="model id (provider default if unset)"),
     report_model: Optional[str] = typer.Option(
         None, "--report-model",

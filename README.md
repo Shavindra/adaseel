@@ -75,9 +75,9 @@ The Anthropic backend talks to the Messages API over plain HTTP, so the
 The CLI has four commands: `research`, `check`, `models`, `selftest`.
 
 ```bash
-# Default: Synechocystis sp. PCC 6803, anthropic backend
-export ANTHROPIC_API_KEY=sk-...
-python -m adaseli research slr1634
+# Default: Synechocystis sp. PCC 6803, OpenRouter backend (free NVIDIA Nemotron)
+export OPENROUTER_API_KEY=sk-or-v1-...
+python -m adaseli research slr1634   # nvidia/nemotron-nano-9b-v2:free
 
 # Ask the report agent a specific question
 python -m adaseli research slr1634 -q "Is slr1634 a membrane protein, and what does it interact with?"
@@ -85,12 +85,14 @@ python -m adaseli research slr1634 -q "Is slr1634 a membrane protein, and what d
 # Use a local model instead — no key, no cloud
 python -m adaseli research slr1634 --provider ollama --model llama3.1
 
-# Free hosted model via OpenRouter (NVIDIA Nemotron, supports tool calling)
-export OPENROUTER_API_KEY=sk-or-v1-...
-python -m adaseli research slr1634 --provider openrouter   # nvidia/nemotron-nano-9b-v2:free
+# Or the Anthropic backend
+export ANTHROPIC_API_KEY=sk-ant-...
+python -m adaseli research slr1634 --provider anthropic   # claude-haiku-4-5-20251001
 
 # Cheap model for search/analysis, a stronger one just for the written report
-python -m adaseli research slr1634 --model claude-haiku-4-5-20251001 --report-model claude-sonnet-4-6
+python -m adaseli research slr1634 \
+    --model nvidia/nemotron-nano-9b-v2:free \
+    --report-model nvidia/llama-3.1-nemotron-ultra-253b-v1:free
 
 # Any organism: override the ids (NCBI taxon / STRING species / KEGG code)
 python -m adaseli research TP53 --organism-name "Homo sapiens" \
