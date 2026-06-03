@@ -73,6 +73,67 @@ def _describe_error(payload):
     return ("%s\n  full payload: %s" % (desc, full)) if desc else full
 
 
+def _is_transient(code):
+    """5xx + gateway timeouts are worth retrying. 429 is deliberately NOT here —
+    rate limits are usually hard caps (e.g. OpenRouter free-models-per-day) and
+    retrying just wastes requests; the error message tells the user what to do."""
+    try:
+        c = int(code)
+    except (TypeError, ValueError):
+        return False
+    return c in (500, 502, 503, 504, 524, 529)
+
+
+def _post_with_retry(url, headers, body, attempts=3):
+    """POST with exponential-backoff retry on transient gateway errors.
+
+    Free OpenRouter providers (e.g. Chutes) regularly return 502/504 mid-stream
+    when a free model is cold-starting or busy. Retry on both real HTTP 5xx AND
+    on OpenRouter's '200 OK with body carrying error.code 5xx' shape (their own
+    convention for upstream failures)."""
+    import time
+    last_err = "no attempt"
+    for i in range(max(1, attempts)):
+        try:
+            resp = requests.post(url, headers=headers, data=json.dumps(body), timeout=180)
+        except requests.exceptions.RequestException as e:
+            last_err = "network: %s" % e
+            log.warning("attempt %d/%d failed: %s", i + 1, attempts, last_err)
+            time.sleep(min(2 ** i, 8))
+            continue
+
+        if not resp.ok:
+            txt = (resp.text or "")[:500]
+            parsed = None
+            try:
+                parsed = json.loads(txt)
+            except ValueError:
+                pass
+            detail = _describe_error(parsed) if parsed else txt
+            if _is_transient(resp.status_code) and i < attempts - 1:
+                wait = min(2 ** i, 8)
+                log.warning("attempt %d/%d: HTTP %s (transient) — retrying in %ss\n%s",
+                            i + 1, attempts, resp.status_code, wait, detail)
+                time.sleep(wait); last_err = "HTTP %s" % resp.status_code; continue
+            log.error("HTTP %s on final attempt:\n%s", resp.status_code, detail)
+            return None, "HTTP %s: %s" % (resp.status_code, detail)
+
+        try:
+            data = resp.json()
+        except ValueError:
+            return None, "non-JSON response: %s" % (resp.text[:500] if resp.text else "<empty>")
+        err = data.get("error") if isinstance(data, dict) else None
+        code = err.get("code") if isinstance(err, dict) else None
+        if err and _is_transient(code) and i < attempts - 1:
+            wait = min(2 ** i, 8)
+            log.warning("attempt %d/%d: 200+error code=%s — retrying in %ss\n%s",
+                        i + 1, attempts, code, wait, _describe_error(data))
+            time.sleep(wait); last_err = "gateway error %s" % code; continue
+        return data, None
+
+    return None, "exhausted retries: %s" % last_err
+
+
 def _resolve_tool_choice(choice):
     """Turn a friendly value into OpenAI's tool_choice shape."""
     if choice is None or choice == "auto":
@@ -108,28 +169,13 @@ def openrouter_step(model, system, messages, tools, max_tokens, tool_choice=None
                           "function": {"name": t["name"], "description": t["description"],
                                        "parameters": t["parameters"]}} for t in tools]
         body["tool_choice"] = _resolve_tool_choice(tool_choice)
-    try:
-        resp = requests.post(_base() + "/chat/completions", headers=_headers(),
-                             data=json.dumps(body), timeout=180)
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException as e:
-        body = ""
-        try:
-            body = e.response.text
-        except Exception:
-            pass
-        detail = body
-        try:
-            detail = _describe_error(json.loads(body))
-        except Exception:
-            pass
+    data, err = _post_with_retry(_base() + "/chat/completions", _headers(), body,
+                                  attempts=int(os.environ.get("ADASELI_RETRIES", "3")))
+    if err is not None:
         hint = key_hint()
         if hint:
-            detail += " [%s]" % hint
-        log.error("openrouter /chat/completions HTTP failed: %s\n%s", e, detail)
-        return {"text": "", "tool_calls": [], "raw": None,
-                "error": "openrouter request failed: %s\n%s" % (e, detail)}
+            err = "%s\n  [%s]" % (err, hint)
+        return {"text": "", "tool_calls": [], "raw": None, "error": err}
 
     # Some models/providers return an error object inside a 200 body — trace it fully.
     if isinstance(data, dict) and data.get("error") and not data.get("choices"):
