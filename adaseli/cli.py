@@ -33,6 +33,14 @@ def _build_parser():
 
     p.add_argument("--check", action="store_true",
                    help="check connectivity to the selected provider (no research run) and exit")
+    p.add_argument("--list-models", action="store_true",
+                   help="list available OpenRouter models (use --filter / --free / --tools) and exit")
+    p.add_argument("--filter", default=None,
+                   help="with --list-models: only show ids containing this substring (e.g. nemotron)")
+    p.add_argument("--free", action="store_true",
+                   help="with --list-models: only show free models")
+    p.add_argument("--tools", action="store_true",
+                   help="with --list-models: only show models that support tool calling")
     p.add_argument("--selftest", action="store_true",
                    help="run the full pipeline offline with a fake model (no network/key needed)")
     return p
@@ -73,9 +81,56 @@ def _do_check(provider, model):
     return 1
 
 
+def _do_list_models(provider, name_filter, free_only, tools_only):
+    """Handle `--list-models`: print available models for the chosen provider."""
+    if provider == "ollama":
+        info = providers.check_ollama()
+        if not info.get("ok"):
+            print("Could not reach Ollama: %s" % info.get("error"))
+            return 1
+        for m in info["models"]:
+            print(m)
+        return 0
+    if provider == "anthropic":
+        print("Model listing isn't exposed for the anthropic provider. Common ids:")
+        for m in ("claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"):
+            print("  " + m)
+        return 0
+    # openrouter
+    info = providers.openrouter_list_models(name_filter=name_filter,
+                                            free_only=free_only, tools_only=tools_only)
+    if not info.get("ok"):
+        print("Could not list OpenRouter models: %s" % info.get("error"))
+        print(info.get("hint", ""))
+        return 1
+    flags = []
+    if name_filter:
+        flags.append("filter=%r" % name_filter)
+    if free_only:
+        flags.append("free")
+    if tools_only:
+        flags.append("tools")
+    print("OpenRouter models (%d)%s:"
+          % (info["count"], (" [" + ", ".join(flags) + "]") if flags else ""))
+    for m in info["models"]:
+        tags = []
+        if m["is_free"]:
+            tags.append("free")
+        tags.append("tools" if m["supports_tools"] else "no-tools")
+        ctx = ("%dk" % (m["context"] // 1000)) if m.get("context") else "?"
+        print("  %-55s ctx=%-5s %s" % (m["id"], ctx, ",".join(tags)))
+    if info["count"] == 0:
+        print("  (none matched — loosen the filters)")
+    return 0
+
+
 def main(argv=None):
     args = _build_parser().parse_args(argv)
     model = args.model or DEFAULT_MODELS[args.provider]
+
+    # --list-models: catalogue only, no gene required.
+    if args.list_models:
+        return _do_list_models(args.provider, args.filter, args.free, args.tools)
 
     # --check: connectivity only, no gene required.
     if args.check:

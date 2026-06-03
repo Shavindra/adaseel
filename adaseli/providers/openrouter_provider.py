@@ -113,3 +113,47 @@ def check_openrouter(model=None):
             pass
         return {"ok": False, "base_url": base, "error": "%s%s" % (e, detail),
                 "hint": "Check the key is valid and OPENROUTER_API_KEY is exported."}
+
+
+def list_models(name_filter=None, free_only=False, tools_only=False):
+    """List models offered by OpenRouter via the public /models endpoint.
+
+    The endpoint needs no auth. Returns {ok, base_url, models:[{id, name, context,
+    prompt_price, is_free, supports_tools}], ...}. Optional filters narrow by a
+    substring of the id, to the free tier, and/or to tool-calling models.
+    """
+    base = _base()
+    try:
+        resp = requests.get(base + "/models", headers=_headers(), timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.RequestException as e:
+        return {"ok": False, "base_url": base, "error": "%s" % e,
+                "hint": "Is openrouter.ai reachable from this network?"}
+
+    nf = (name_filter or "").lower()
+    models = []
+    for m in data.get("data", []):
+        mid = m.get("id", "")
+        pricing = m.get("pricing", {}) or {}
+        # OpenRouter prices are per-token strings; "0" means free.
+        prompt_price = pricing.get("prompt", "")
+        is_free = mid.endswith(":free") or prompt_price in ("0", "0.0", 0)
+        supported = m.get("supported_parameters", []) or []
+        supports_tools = "tools" in supported or "tool_choice" in supported
+        if nf and nf not in mid.lower():
+            continue
+        if free_only and not is_free:
+            continue
+        if tools_only and not supports_tools:
+            continue
+        models.append({
+            "id": mid,
+            "name": m.get("name"),
+            "context": (m.get("context_length") or m.get("top_provider", {}).get("context_length")),
+            "prompt_price": prompt_price,
+            "is_free": is_free,
+            "supports_tools": supports_tools,
+        })
+    models.sort(key=lambda x: x["id"])
+    return {"ok": True, "base_url": base, "count": len(models), "models": models}

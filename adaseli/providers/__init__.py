@@ -17,7 +17,7 @@ from .anthropic_provider import (anthropic_step, anthropic_add_tool_results,
                                  check_anthropic)
 from .ollama_provider import ollama_step, ollama_add_tool_results, check_ollama
 from .openrouter_provider import (openrouter_step, openrouter_add_tool_results,
-                                  check_openrouter)
+                                  check_openrouter, list_models as openrouter_list_models)
 from .fake import make_fake_provider
 
 # The offline self-test registers its closure here; "fake" provider dispatches to it.
@@ -57,4 +57,4 @@ def add_tool_results(provider, messages, results):
 
 
 __all__ = ["llm_step", "add_tool_results", "set_fake_provider", "make_fake_provider",
-           "check_ollama", "check_anthropic", "check_openrouter"]
+           "check_ollama", "check_anthropic", "check_openrouter", "openrouter_list_models"]
