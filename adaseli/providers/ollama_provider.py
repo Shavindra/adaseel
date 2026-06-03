@@ -44,14 +44,22 @@ def ollama_step(model, system, messages, tools, max_tokens):
     msg.setdefault("role", "assistant")
     tool_calls = []
     for i, tc in enumerate(msg.get("tool_calls", []) or []):
-        fn = tc.get("function", {})
-        args = fn.get("arguments", {})
-        if isinstance(args, str):  # some builds return a JSON string
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        name = fn.get("name") or tc.get("name")
+        # Some builds nest arguments under function, others on the call itself;
+        # some send a JSON-encoded string instead of a dict.
+        args = fn.get("arguments") if fn.get("arguments") is not None else tc.get("arguments", {})
+        if isinstance(args, str):
             try:
-                args = json.loads(args)
+                args = json.loads(args or "{}")
             except ValueError:
                 args = {}
-        tool_calls.append({"id": "call_%d" % i, "name": fn.get("name"), "input": args})
+        if name:
+            tool_calls.append({"id": tc.get("id") or "call_%d" % i, "name": name, "input": args or {}})
+    if not tool_calls and not text:
+        log.warning("ollama returned empty message; raw:\n%s", json.dumps(msg)[:1000])
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 

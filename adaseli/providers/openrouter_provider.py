@@ -128,18 +128,61 @@ def openrouter_step(model, system, messages, tools, max_tokens):
     # Normalise so the re-sent assistant message is valid (some servers reject null).
     msg["content"] = text
     msg.setdefault("role", "assistant")
-    tool_calls = []
-    for tc in msg.get("tool_calls", []) or []:
-        fn = tc.get("function", {})
-        args = fn.get("arguments", {})
-        if isinstance(args, str):  # OpenAI sends arguments as a JSON string
+    finish = choices[0].get("finish_reason")
+    tool_calls = _parse_tool_calls(msg, text)
+    if not tool_calls and finish == "tool_calls":
+        log.error("finish_reason='tool_calls' but no tool calls parsed; raw message:\n%s",
+                  json.dumps(msg)[:2000])
+    elif not tool_calls and not text:
+        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
+                    finish, json.dumps(msg)[:1000])
+    return {"text": text, "tool_calls": tool_calls, "raw": msg}
+
+
+def _parse_tool_calls(msg, text):
+    """Tolerantly extract tool calls. Handles the standard OpenAI shape
+    (function:{name,arguments}), the flat shape some free providers use
+    (name+arguments on the tool_call itself), and a JSON blob embedded in the
+    assistant's content text — different providers nest these differently."""
+    out = []
+    for i, tc in enumerate(msg.get("tool_calls") or []):
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        name = fn.get("name") or tc.get("name")
+        args = fn.get("arguments") if fn.get("arguments") is not None else tc.get("arguments", {})
+        if isinstance(args, str):
             try:
                 args = json.loads(args or "{}")
             except ValueError:
                 args = {}
-        tool_calls.append({"id": tc.get("id"), "name": fn.get("name"), "input": args})
-    # Append the assistant message verbatim next turn (keeps ids/arguments intact).
-    return {"text": text, "tool_calls": tool_calls, "raw": msg}
+        if name:
+            out.append({"id": tc.get("id") or "call_%d" % i, "name": name, "input": args or {}})
+    if out:
+        return out
+    stripped = (text or "").strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            blob = json.loads(stripped)
+        except ValueError:
+            return out
+        candidates = blob.get("tool_calls") if isinstance(blob, dict) else None
+        if not candidates and isinstance(blob, dict) and blob.get("name"):
+            candidates = [blob]
+        for i, tc in enumerate(candidates or []):
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            name = fn.get("name") or tc.get("name")
+            args = fn.get("arguments") if fn.get("arguments") is not None else tc.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args or "{}")
+                except ValueError:
+                    args = {}
+            if name:
+                out.append({"id": tc.get("id") or "call_%d" % i, "name": name, "input": args or {}})
+    return out
 
 
 def openrouter_add_tool_results(messages, results):
