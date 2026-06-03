@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# MEDLENS: live report output is regenerated each run
+medlens/lab_report_review.md

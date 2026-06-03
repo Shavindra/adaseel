@@ -81,7 +81,7 @@ results, flagged abnormalities, possible considerations, limitations & coverage)
 | `medlens.py` | the whole single-file pipeline (functions, sequential, well-commented) |
 | `sample_lab_report.png` | synthetic FBC "scan" for testing (obviously fake patient) |
 | `sample_lab_report.txt` | the OCR-equivalent transcript / offline fallback |
-| `lab_report_review.md` | example output from a run (regenerated each run) |
+| `example_lab_report_review.md` | a saved example run (the live `lab_report_review.md` is regenerated each run and git-ignored) |
 
 ## Configuration
 
