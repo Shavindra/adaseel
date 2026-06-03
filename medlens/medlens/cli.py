@@ -44,10 +44,10 @@ def _setup_logging(verbose, log_file=None):
 
 
 def _cfg(base_url, model, api_key, fake=False, max_tokens=8192,
-         no_reasoning=False, reasoning_effort=None):
+         no_reasoning=False, reasoning_effort=None, retries=3):
     return {"base_url": base_url, "model": model, "api_key": api_key, "fake": fake,
             "max_tokens": max_tokens, "no_reasoning": no_reasoning,
-            "reasoning_effort": reasoning_effort}
+            "reasoning_effort": reasoning_effort, "retries": retries}
 
 
 def _ensure_sample():
@@ -72,6 +72,8 @@ def review(
     reasoning_effort: Optional[str] = typer.Option(None, "--reasoning-effort",
                                                    help="OpenRouter: 'low'|'medium'|'high' "
                                                         "(alternative to --no-reasoning)"),
+    retries: int = typer.Option(3, "--retries",
+                                help="retry transient 5xx/502/503/504 gateway errors"),
     quiet: bool = typer.Option(False, "--quiet"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="show debug logs"),
     log_file: Optional[str] = typer.Option(None, "--log-file"),
@@ -82,7 +84,8 @@ def review(
     input_path = input or _ensure_sample()
     out_path = out or labtools.DEFAULT_OUT
     run_review(_cfg(base_url, model, api_key, max_tokens=max_tokens,
-                    no_reasoning=no_reasoning, reasoning_effort=reasoning_effort),
+                    no_reasoning=no_reasoning, reasoning_effort=reasoning_effort,
+                    retries=retries),
                input_path, out_path, max_steps=max_steps)
 
 

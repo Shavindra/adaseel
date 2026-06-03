@@ -52,6 +52,68 @@ def _describe_error(payload):
     return ("%s\n  full payload: %s" % (desc, full)) if desc else full
 
 
+def _is_transient(code):
+    """5xx codes that are worth a retry (gateway/server hiccups). 408 too (timeout)."""
+    try:
+        c = int(code)
+    except (TypeError, ValueError):
+        return False
+    return c in (408, 429, 500, 502, 503, 504, 524, 529)
+
+
+def _post_with_retry(url, headers, body, attempts=3):
+    """POST with retry on transient gateway/server errors. Returns (data, error).
+
+    Free OpenRouter providers (e.g. Chutes) regularly return 502/504 mid-stream
+    while a free model is cold-starting or busy; one retry usually resolves it.
+    We retry on both real HTTP 5xx (e.g. 504 Gateway Timeout) AND on OpenRouter's
+    own 200-with-error-body shape carrying a 5xx code, which is what they emit
+    when the upstream provider fails."""
+    import time
+    last_err = "no attempt"
+    for i in range(max(1, attempts)):
+        try:
+            resp = requests.post(url, headers=headers, data=json.dumps(body), timeout=180)
+        except requests.exceptions.RequestException as e:
+            last_err = "network: %s" % e
+            log.warning("attempt %d/%d failed: %s", i + 1, attempts, last_err)
+            time.sleep(min(2 ** i, 8))
+            continue
+
+        # HTTP-level error (4xx/5xx).
+        if not resp.ok:
+            txt = (resp.text or "")[:500]
+            parsed = None
+            try:
+                parsed = json.loads(txt)
+            except ValueError:
+                pass
+            detail = _describe_error(parsed) if parsed else txt
+            if _is_transient(resp.status_code) and i < attempts - 1:
+                wait = min(2 ** i, 8)
+                log.warning("attempt %d/%d: HTTP %s (transient) — retrying in %ss\n%s",
+                            i + 1, attempts, resp.status_code, wait, detail)
+                time.sleep(wait); last_err = "HTTP %s" % resp.status_code; continue
+            log.error("HTTP %s on final attempt:\n%s", resp.status_code, detail)
+            return None, "HTTP %s: %s" % (resp.status_code, detail)
+
+        # 200 OK — but the body might still carry a transient error (OpenRouter pattern).
+        try:
+            data = resp.json()
+        except ValueError:
+            return None, "non-JSON response: %s" % (resp.text[:500] if resp.text else "<empty>")
+        err = data.get("error") if isinstance(data, dict) else None
+        code = err.get("code") if isinstance(err, dict) else None
+        if err and _is_transient(code) and i < attempts - 1:
+            wait = min(2 ** i, 8)
+            log.warning("attempt %d/%d: gateway returned 200+error code=%s — retrying in %ss\n%s",
+                        i + 1, attempts, code, wait, _describe_error(data))
+            time.sleep(wait); last_err = "gateway error %s" % code; continue
+        return data, None
+
+    return None, "exhausted retries: %s" % last_err
+
+
 def _resolve_tool_choice(choice):
     """Turn a friendly value into the OpenAI tool_choice shape.
     None / "auto" -> "auto"; "required" -> "required"; a function name string
@@ -93,25 +155,9 @@ def chat(cfg, messages, tools=None, tool_choice=None):
         body["tool_choice"] = _resolve_tool_choice(tool_choice)
     headers = {"Authorization": "Bearer %s" % cfg.get("api_key", ""),
                "Content-Type": "application/json"}
-    try:
-        resp = requests.post(url, headers=headers, data=json.dumps(body), timeout=180)
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException as e:
-        # Surface the FULL response body (parsed if it's a structured error).
-        body = ""
-        try:
-            body = e.response.text
-        except Exception:
-            pass
-        detail = body
-        try:
-            detail = _describe_error(json.loads(body))
-        except Exception:
-            pass
-        log.error("LLM HTTP request failed: %s\n%s", e, detail)
-        return {"text": "", "tool_calls": [], "raw": None,
-                "error": "LLM HTTP request failed: %s\n%s" % (e, detail)}
+    data, err = _post_with_retry(url, headers, body, attempts=cfg.get("retries", 3))
+    if err is not None:
+        return {"text": "", "tool_calls": [], "raw": None, "error": err}
 
     log.debug("LLM raw response: %s", json.dumps(data)[:2000])
 
