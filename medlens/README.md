@@ -16,7 +16,9 @@ work by selecting and calling tools**, rather than a hardwired pipeline.
 - **Human-in-the-loop.** Every reasoning output is an **unverified draft** for a
   qualified clinician; the report is structured to make that obvious.
 - **Prominent disclaimer** leads (and closes) every report and every run.
-- **Local-first.** OCR runs locally; the model defaults to a local Ollama endpoint.
+- **Local-capable.** OCR runs locally; the reasoning model is vendor-agnostic —
+  default is OpenRouter, but point `--base-url` at a local Ollama to keep
+  everything on-machine.
 
 ## Agentic design (and why it's still safe)
 
@@ -55,16 +57,18 @@ models on first use).
 ## Run
 
 ```bash
-# Run the agent on the synthetic sample, against a LOCAL model via Ollama
-#   ollama pull meditron        # or a MedGemma build
-python -m medlens review --base-url http://localhost:11434/v1 --model meditron
-
-# Vendor-agnostic: any OpenAI-compatible endpoint with tool calling works
-export MEDLENS_API_KEY=...      # ignored by Ollama; required by hosted gateways
-python -m medlens review --base-url https://openrouter.ai/api/v1 --model qwen/qwen-2.5-72b-instruct
+# Default backend is OpenRouter (free, tool-calling NVIDIA Nemotron)
+export OPENROUTER_API_KEY=sk-or-v1-...
+python -m medlens review                       # nvidia/nemotron-nano-9b-v2:free
 
 # Check the endpoint is reachable
-python -m medlens check --base-url http://localhost:11434/v1
+python -m medlens check
+
+# Vendor-agnostic: swap to any OpenAI-compatible endpoint with tool calling…
+#   …a fully-local model via Ollama:
+python -m medlens review --base-url http://localhost:11434/v1 --model qwen2.5
+#   …or another OpenRouter model:
+python -m medlens review --model qwen/qwen-2.5-72b-instruct
 
 # Run the whole agent loop OFFLINE (no model/key) — uses a scripted fake model
 python -m medlens selftest -v
@@ -72,6 +76,10 @@ python -m medlens selftest -v
 # (Re)generate the synthetic sample scan
 python -m medlens sample
 ```
+
+> The agent needs a model that supports **tool calling**. The default Nemotron
+> does; on Ollama use `qwen2.5` / `llama3.1` (text-only medical models like
+> `meditron` can't drive the tools).
 
 The run streams the agent's tool calls (with a spinner) and writes
 **`lab_report_review.md`** (disclaimer header, extracted results, deterministic
@@ -98,9 +106,9 @@ medlens/
 
 | Flag / env | Purpose | Default |
 | --- | --- | --- |
-| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint | `http://localhost:11434/v1` |
-| `--model` / `MEDLENS_MODEL` | reasoning model id | `meditron` |
-| `--api-key` / `MEDLENS_API_KEY` | API key (ignored by Ollama) | `OPENAI_API_KEY` or `ollama` |
+| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint | `https://openrouter.ai/api/v1` |
+| `--model` / `MEDLENS_MODEL` | reasoning model id | `nvidia/nemotron-nano-9b-v2:free` |
+| `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` |
 | `--input` | path to a synthetic scan | the bundled sample |
 | `--out` | report output path | `lab_report_review.md` |
 

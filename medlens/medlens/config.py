@@ -12,12 +12,15 @@ DISCLAIMER = (
 )
 
 # Vendor-agnostic LLM: any OpenAI-compatible /chat/completions endpoint over plain
-# HTTP (no vendor SDK). Local-first default = Ollama's /v1 server. Point it at a
-# local MedGemma/Meditron, or a hosted gateway (OpenRouter/Groq/Gemini), by
-# swapping base_url/model. The api_key is ignored by Ollama, required by hosted APIs.
-DEFAULT_BASE_URL = os.environ.get("MEDLENS_BASE_URL", "http://localhost:11434/v1")
-DEFAULT_MODEL = os.environ.get("MEDLENS_MODEL", "meditron")  # a medical model is recommended
-DEFAULT_API_KEY = os.environ.get("MEDLENS_API_KEY") or os.environ.get("OPENAI_API_KEY") or "ollama"
+# HTTP (no vendor SDK). Default = OpenRouter (free, tool-calling NVIDIA Nemotron),
+# matching adaseli. Point it elsewhere by swapping base_url/model: a local Ollama
+# (http://localhost:11434/v1) for fully-local runs, or any hosted gateway
+# (Groq/Gemini/…). The api_key is required by hosted APIs, ignored by Ollama.
+DEFAULT_BASE_URL = os.environ.get("MEDLENS_BASE_URL", "https://openrouter.ai/api/v1")
+DEFAULT_MODEL = os.environ.get("MEDLENS_MODEL", "nvidia/nemotron-nano-9b-v2:free")
+DEFAULT_API_KEY = (os.environ.get("MEDLENS_API_KEY")
+                   or os.environ.get("OPENROUTER_API_KEY")
+                   or os.environ.get("OPENAI_API_KEY") or "")
 
 # The agent's system prompt: it tells the model which tools exist, the workflow,
 # and the hard safety rules. The model DRIVES — it chooses to call the tools — but
