@@ -41,10 +41,16 @@ def lookup_orthologs(query, orthodb_group=None):
         for entry in orth["data"][:12]:
             org = entry.get("organism", {})
             genes = entry.get("genes", [])
-            organisms.append({
-                "organism": org.get("name"),
-                "example_gene": (genes[0].get("gene_id", {}) or {}).get("param") if genes else None,
-            })
+            # OrthoDB's gene_id is a dict like {"id":..,"label":..}; be tolerant of
+            # the exact key (and of it being a bare string) rather than assuming "param".
+            example = None
+            if genes:
+                gid = genes[0].get("gene_id")
+                if isinstance(gid, dict):
+                    example = gid.get("id") or gid.get("label") or gid.get("param")
+                elif gid:
+                    example = gid
+            organisms.append({"organism": org.get("name"), "example_gene": example})
     out["example_organisms"] = organisms
     out["n_organisms_listed"] = len(organisms)
     return out

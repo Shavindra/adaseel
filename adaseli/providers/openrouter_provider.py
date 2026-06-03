@@ -46,6 +46,33 @@ def _headers():
     }
 
 
+def _describe_error(payload):
+    """Detailed description of an OpenRouter error payload — never reduce it to a
+    one-line summary. OpenRouter hides the real upstream failure in
+    error.metadata (provider_name + the provider's raw error)."""
+    if not isinstance(payload, dict):
+        return str(payload)[:2000]
+    err = payload.get("error", payload)
+    if isinstance(err, str):
+        return err
+    parts = []
+    for k in ("code", "type"):
+        if err.get(k) is not None:
+            parts.append("%s=%s" % (k, err.get(k)))
+    if err.get("message"):
+        parts.append(str(err["message"]))
+    meta = err.get("metadata") or {}
+    if isinstance(meta, dict):
+        if meta.get("provider_name"):
+            parts.append("provider=%s" % meta["provider_name"])
+        raw = meta.get("raw") or meta.get("raw_error")
+        if raw:
+            parts.append("raw=%s" % (raw if isinstance(raw, str) else json.dumps(raw))[:1000])
+    desc = " | ".join(parts)
+    full = json.dumps(payload)[:2000]
+    return ("%s\n  full payload: %s" % (desc, full)) if desc else full
+
+
 def openrouter_step(model, system, messages, tools, max_tokens):
     """Run one OpenRouter turn; return normalised {text, tool_calls, raw}."""
     if not os.environ.get("OPENROUTER_API_KEY"):
@@ -67,26 +94,40 @@ def openrouter_step(model, system, messages, tools, max_tokens):
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.RequestException as e:
-        detail = ""
+        body = ""
         try:
-            detail = " — " + e.response.text[:300]
+            body = e.response.text
+        except Exception:
+            pass
+        detail = body
+        try:
+            detail = _describe_error(json.loads(body))
         except Exception:
             pass
         hint = key_hint()
         if hint:
             detail += " [%s]" % hint
-        log.error("openrouter /chat/completions failed: %s%s", e, detail)
+        log.error("openrouter /chat/completions HTTP failed: %s\n%s", e, detail)
         return {"text": "", "tool_calls": [], "raw": None,
-                "error": "openrouter request failed: %s%s" % (e, detail)}
+                "error": "openrouter request failed: %s\n%s" % (e, detail)}
 
-    # Some free models return an error object inside a 200 body.
+    # Some models/providers return an error object inside a 200 body — trace it fully.
     if isinstance(data, dict) and data.get("error") and not data.get("choices"):
+        detail = _describe_error(data)
+        log.error("openrouter returned an error payload:\n%s", detail)
+        return {"text": "", "tool_calls": [], "raw": None, "error": "openrouter: %s" % detail}
+    if not (isinstance(data, dict) and data.get("choices")):
+        detail = json.dumps(data)[:2000] if isinstance(data, dict) else str(data)[:2000]
+        log.error("openrouter returned no choices:\n%s", detail)
         return {"text": "", "tool_calls": [], "raw": None,
-                "error": "openrouter: %s" % data["error"].get("message", data["error"])}
+                "error": "openrouter: no choices: %s" % detail}
 
     choices = data.get("choices") or [{}]
     msg = choices[0].get("message", {}) or {}
     text = msg.get("content") or ""
+    # Normalise so the re-sent assistant message is valid (some servers reject null).
+    msg["content"] = text
+    msg.setdefault("role", "assistant")
     tool_calls = []
     for tc in msg.get("tool_calls", []) or []:
         fn = tc.get("function", {})

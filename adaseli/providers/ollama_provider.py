@@ -39,6 +39,9 @@ def ollama_step(model, system, messages, tools, max_tokens):
 
     msg = data.get("message", {})
     text = msg.get("content", "") or ""
+    # Normalise so the re-sent assistant message is valid next turn.
+    msg["content"] = text
+    msg.setdefault("role", "assistant")
     tool_calls = []
     for i, tc in enumerate(msg.get("tool_calls", []) or []):
         fn = tc.get("function", {})
