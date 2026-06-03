@@ -21,6 +21,9 @@ HTTP_TIMEOUT = 30  # seconds — public APIs are sometimes slow; fail soft, not 
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "ollama": "llama3.1",
+    # A free, tool-calling NVIDIA Nemotron on OpenRouter. Any OpenRouter model id
+    # works via --model (e.g. nvidia/llama-3.1-nemotron-ultra-253b-v1:free).
+    "openrouter": "nvidia/nemotron-nano-9b-v2:free",
 }
 
 # Kyte & Doolittle hydropathy scale (used by compute_hydrophobicity, fully local).

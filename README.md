@@ -27,6 +27,7 @@ adaseli/
   providers/           pluggable LLM backends
     anthropic_provider.py   Claude over plain HTTP (no SDK needed)
     ollama_provider.py      local models via /api/chat (+ connectivity check)
+    openrouter_provider.py  OpenRouter (OpenAI-compatible; free Nemotron etc.)
     fake.py                 offline provider used by --selftest
 ```
 
@@ -70,6 +71,10 @@ python -m adaseli slr1634
 # Use a local model instead — no key, no cloud
 python -m adaseli slr1634 --provider ollama --model llama3.1
 
+# Free hosted model via OpenRouter (NVIDIA Nemotron, supports tool calling)
+export OPENROUTER_API_KEY=sk-or-v1-...
+python -m adaseli slr1634 --provider openrouter   # defaults to nvidia/nemotron-nano-9b-v2:free
+
 # Switch to a stronger model for report quality
 python -m adaseli slr1634 --model claude-sonnet-4-6
 
@@ -108,6 +113,24 @@ a one-line summary of what it returned so you can watch it work.
 > Tool calling quality varies by local model — use a model that supports tools
 > (llama3.1+, qwen2.5, mistral-nemo). Smaller models may need a couple of retries.
 
+## Connecting to OpenRouter (free Nemotron)
+
+[OpenRouter](https://openrouter.ai) is an OpenAI-compatible gateway with several
+free, tool-calling NVIDIA Nemotron models.
+
+```bash
+export OPENROUTER_API_KEY=sk-or-v1-...           # never hardcode this
+python -m adaseli --check --provider openrouter  # validates the key + reachability
+
+# run with the default free model, or pick another OpenRouter model id
+python -m adaseli slr1634 --provider openrouter
+python -m adaseli slr1634 --provider openrouter \
+    --model nvidia/llama-3.1-nemotron-ultra-253b-v1:free
+```
+
+Override the gateway with `OPENROUTER_BASE_URL` if needed. The key is read only
+from the environment — it is never written to disk or committed.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -115,6 +138,8 @@ a one-line summary of what it returned so you can watch it work.
 | `ANTHROPIC_API_KEY` | required for `--provider anthropic` |
 | `ANTHROPIC_BASE_URL` | optional; defaults to `https://api.anthropic.com` |
 | `OLLAMA_HOST` | optional; defaults to `http://localhost:11434` |
+| `OPENROUTER_API_KEY` | required for `--provider openrouter` |
+| `OPENROUTER_BASE_URL` | optional; defaults to `https://openrouter.ai/api/v1` |
 | `NCBI_EMAIL` | optional; polite identifier for NCBI E-utilities |
 
 ## Notes

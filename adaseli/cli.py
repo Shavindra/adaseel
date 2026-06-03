@@ -17,8 +17,8 @@ def _build_parser():
         description="adaseli — exhaustive multi-omics gene research agent",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("gene", nargs="?", help="gene / locus tag, e.g. slr1634")
-    p.add_argument("--provider", choices=["anthropic", "ollama"], default="anthropic",
-                   help="LLM backend (default: anthropic)")
+    p.add_argument("--provider", choices=["anthropic", "ollama", "openrouter"],
+                   default="anthropic", help="LLM backend (default: anthropic)")
     p.add_argument("--model", default=None,
                    help="model id (default: %s for anthropic, %s for ollama)"
                         % (DEFAULT_MODELS["anthropic"], DEFAULT_MODELS["ollama"]))
@@ -51,6 +51,16 @@ def _do_check(provider, model):
                 return 1
             return 0
         print("\nCould not reach Ollama: %s" % info.get("error"))
+        print(info.get("hint", ""))
+        return 1
+    if provider == "openrouter":
+        info = providers.check_openrouter(model)
+        print(json.dumps(info, indent=2))
+        if info.get("ok"):
+            print("\nOpenRouter key valid; gateway reachable at %s." % info["base_url"])
+            print("Default model for runs: %s" % model)
+            return 0
+        print("\nOpenRouter check failed: %s" % info.get("error"))
         print(info.get("hint", ""))
         return 1
     # anthropic
@@ -88,6 +98,9 @@ def main(argv=None):
 
     if args.provider == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: ANTHROPIC_API_KEY is not set (or use --provider ollama / --selftest)")
+    if args.provider == "openrouter" and not os.environ.get("OPENROUTER_API_KEY"):
+        sys.exit("error: OPENROUTER_API_KEY is not set "
+                 "(export it, e.g. `export OPENROUTER_API_KEY=sk-or-v1-...`)")
 
     run_agent(args.gene, org, provider=args.provider, model=model,
               max_steps=args.max_steps, out_path=args.out)
