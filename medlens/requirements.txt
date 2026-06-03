@@ -3,13 +3,16 @@
 # Always needed:
 requests>=2.28
 pillow>=9.0          # renders the synthetic sample image
+typer>=0.12         # CLI
+rich>=13.0          # spinner + progress feedback
 
-# OCR stack (Stage 1, local). Heavy (pulls in torch + downloads models on first
-# use). If absent, MEDLENS falls back to a text transcript so the pipeline still
+# OCR stack (the extract tool, local). Heavy (pulls in torch + downloads models on
+# first use). If absent, MEDLENS falls back to a text transcript so the agent still
 # runs for testing.
 docling>=2.0
 surya-ocr>=0.6
 
-# Reasoning stage (Stage 3) is vendor-agnostic: it calls any OpenAI-compatible
-# /chat/completions endpoint over plain HTTP via `requests` above. No vendor SDK
-# (openai/anthropic/etc.) is needed — point --base-url at Ollama, Groq, Gemini, …
+# The reasoning is vendor-agnostic: the agent calls any OpenAI-compatible
+# /chat/completions endpoint (with tool calling) over plain HTTP via `requests`.
+# No vendor SDK (openai/anthropic/…) is needed — point --base-url at Ollama, Groq,
+# Gemini, OpenRouter, vLLM, …
