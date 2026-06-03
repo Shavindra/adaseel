@@ -24,6 +24,7 @@ def run_review(cfg, input_path, out_path, max_steps=8):
     ctx = {"input_path": input_path, "out_path": out_path}
     messages = [{"role": "system", "content": AGENT_SYSTEM},
                 {"role": "user", "content": TASK}]
+    last_text = ""
 
     for step in range(1, max_steps + 1):
         with feedback.working("agent deciding next step"):
@@ -34,6 +35,7 @@ def run_review(cfg, input_path, out_path, max_steps=8):
         if s["raw"] is not None:
             messages.append(s["raw"])
         if s["text"].strip():
+            last_text = s["text"]
             feedback.thinking(s["text"])
         if not s["tool_calls"]:
             break  # agent has nothing more to do
@@ -65,5 +67,16 @@ def run_review(cfg, input_path, out_path, max_steps=8):
     if ctx.get("saved"):
         feedback.done(ctx["saved"])
         return ctx["saved"]
-    feedback.error("no report produced (extraction may have failed)")
+
+    # Nothing was extracted at all → the model never called a tool. The most
+    # common cause is a model that doesn't do tool calling.
+    if not ctx.get("rows"):
+        feedback.error("the model returned no tool calls, so nothing was extracted.")
+        if last_text:
+            feedback.note("model said: %s" % last_text[:300])
+        feedback.note("This model's endpoint may not support tool calling. The model is your "
+                      "choice (--model); list ones that can drive the agent with "
+                      "`medlens models --free --tools`. Run with -v to see the raw response.")
+    else:
+        feedback.error("no report produced.")
     return None

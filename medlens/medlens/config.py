@@ -17,6 +17,9 @@ DISCLAIMER = (
 # (http://localhost:11434/v1) for fully-local runs, or any hosted gateway
 # (Groq/Gemini/…). The api_key is required by hosted APIs, ignored by Ollama.
 DEFAULT_BASE_URL = os.environ.get("MEDLENS_BASE_URL", "https://openrouter.ai/api/v1")
+# YOU choose the model — set it here or via --model / MEDLENS_MODEL. The code never
+# picks or switches models for you. Note the agent needs a model whose endpoint
+# supports tool calling; `python -m medlens models --free --tools` lists options.
 DEFAULT_MODEL = os.environ.get("MEDLENS_MODEL", "nvidia/nemotron-nano-9b-v2:free")
 DEFAULT_API_KEY = (os.environ.get("MEDLENS_API_KEY")
                    or os.environ.get("OPENROUTER_API_KEY")

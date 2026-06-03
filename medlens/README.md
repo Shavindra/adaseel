@@ -57,18 +57,19 @@ models on first use).
 ## Run
 
 ```bash
-# Default backend is OpenRouter (free, tool-calling NVIDIA Nemotron)
+# Default backend is OpenRouter; YOU pick the model with --model / MEDLENS_MODEL
 export OPENROUTER_API_KEY=sk-or-v1-...
-python -m medlens review                       # nvidia/nemotron-nano-9b-v2:free
+python -m medlens review                       # default: nvidia/nemotron-nano-9b-v2:free
+python -m medlens review --model <your-chosen-model>
+
+# Optional: list models so YOU can choose one whose endpoint supports tool calling
+python -m medlens models --free --tools
 
 # Check the endpoint is reachable
 python -m medlens check
 
-# Vendor-agnostic: swap to any OpenAI-compatible endpoint with tool calling…
-#   …a fully-local model via Ollama:
+# Fully local via Ollama (pick a tool-calling model)
 python -m medlens review --base-url http://localhost:11434/v1 --model qwen2.5
-#   …or another OpenRouter model:
-python -m medlens review --model qwen/qwen-2.5-72b-instruct
 
 # Run the whole agent loop OFFLINE (no model/key) — uses a scripted fake model
 python -m medlens selftest -v
@@ -77,9 +78,10 @@ python -m medlens selftest -v
 python -m medlens sample
 ```
 
-> The agent needs a model that supports **tool calling**. The default Nemotron
-> does; on Ollama use `qwen2.5` / `llama3.1` (text-only medical models like
-> `meditron` can't drive the tools).
+> You choose the model; MEDLENS never picks or switches it. The agent does need a
+> model whose endpoint supports **tool calling** — if the one you pick returns no
+> tool calls, MEDLENS says so (add `-v` for the raw response) and the `models
+> --free --tools` command lists candidates, but the choice stays yours.
 
 The run streams the agent's tool calls (with a spinner) and writes
 **`lab_report_review.md`** (disclaimer header, extracted results, deterministic
@@ -107,7 +109,7 @@ medlens/
 | Flag / env | Purpose | Default |
 | --- | --- | --- |
 | `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint | `https://openrouter.ai/api/v1` |
-| `--model` / `MEDLENS_MODEL` | reasoning model id | `nvidia/nemotron-nano-9b-v2:free` |
+| `--model` / `MEDLENS_MODEL` | reasoning model id you choose (needs tool calling) | `nvidia/nemotron-nano-9b-v2:free` |
 | `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` |
 | `--input` | path to a synthetic scan | the bundled sample |
 | `--out` | report output path | `lab_report_review.md` |

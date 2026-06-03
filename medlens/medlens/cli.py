@@ -94,6 +94,28 @@ def check(
 
 
 @app.command()
+def models(
+    base_url: str = typer.Option(DEFAULT_BASE_URL, "--base-url"),
+    api_key: str = typer.Option(DEFAULT_API_KEY, "--api-key"),
+    filter: Optional[str] = typer.Option(None, "--filter", help="only ids containing this substring"),
+    free: bool = typer.Option(False, "--free", help="only free models"),
+    tools: bool = typer.Option(False, "--tools", help="only tool-calling models (needed for the agent)"),
+):
+    """List models the endpoint offers (use --free --tools to find a usable one)."""
+    info = providers.list_models(_cfg(base_url, model="", api_key=api_key),
+                                 name_filter=filter, free_only=free, tools_only=tools)
+    if not info.get("ok"):
+        typer.secho("could not list models: %s" % info.get("error"), fg=typer.colors.RED)
+        raise typer.Exit(1)
+    typer.secho("models (%d):" % info["count"], fg=typer.colors.CYAN)
+    for m in info["models"]:
+        tags = (["free"] if m["is_free"] else []) + (["tools"] if m["supports_tools"] else ["no-tools"])
+        typer.echo("  %-55s %s" % (m["id"], ",".join(tags)))
+    if info["count"] == 0:
+        typer.echo("  (none matched — loosen the filters)")
+
+
+@app.command()
 def sample():
     """(Re)generate the synthetic sample scan + transcript."""
     img, txt = labtools.generate_synthetic_report()
