@@ -53,12 +53,14 @@ def _describe_error(payload):
 
 
 def _is_transient(code):
-    """5xx codes that are worth a retry (gateway/server hiccups). 408 too (timeout)."""
+    """5xx + gateway timeouts are worth retrying. 429 is deliberately NOT here —
+    rate limits are usually hard caps (e.g. OpenRouter free-models-per-day) and
+    retrying just wastes the quota; the error message tells the user what to do."""
     try:
         c = int(code)
     except (TypeError, ValueError):
         return False
-    return c in (408, 429, 500, 502, 503, 504, 524, 529)
+    return c in (500, 502, 503, 504, 524, 529)
 
 
 def _post_with_retry(url, headers, body, attempts=3):
