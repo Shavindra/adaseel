@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaseli"
+version = "1.0.0"
+description = "Exhaustive multi-omics gene research agent (pluggable LLM backend)"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["requests>=2.28"]
+
+[project.optional-dependencies]
+# Not required: the Anthropic backend uses plain HTTP. Install only if preferred.
+anthropic = ["anthropic>=0.40"]
+
+[project.scripts]
+adaseli = "adaseli.cli:main"
+
+[tool.setuptools]
+packages = ["adaseli", "adaseli.tools", "adaseli.providers"]

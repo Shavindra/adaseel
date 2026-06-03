@@ -5,9 +5,30 @@ queries many free public biological databases, keeps digging until it has tried
 every relevant source, and writes a structured Markdown report of *what is
 already known*. No hypothesis generation — pure retrieval + synthesis.
 
-It is a small, readable, single-file CLI agent (`adaseli.py`): no classes, no
-async, no agent framework. The LLM backend is pluggable, so you are **not locked
-to any one provider** — run it against Claude or a local Ollama model.
+It is a small, readable, framework-free agent (functions, not classes). The LLM
+backend is **pluggable**, so you are not locked to any one provider — run it
+against Claude or a local Ollama model.
+
+## Package layout
+
+```
+adaseli/
+  config.py            constants, organism defaults, prompts
+  http.py              one shared, fail-soft HTTP helper
+  agent.py             the research loop + report assembly
+  cli.py               argument parsing / entry point
+  tools/               the nine data-source tools + registry/dispatcher
+    sequence.py          UniProt, AlphaFold, hydrophobicity
+    network.py           STRING, KEGG
+    expression.py        NCBI GEO
+    literature.py        PubMed, Europe PMC
+    orthology.py         OrthoDB
+    registry.py          tool schemas, dispatcher, summariser
+  providers/           pluggable LLM backends
+    anthropic_provider.py   Claude over plain HTTP (no SDK needed)
+    ollama_provider.py      local models via /api/chat (+ connectivity check)
+    fake.py                 offline provider used by --selftest
+```
 
 ## What it looks at
 
@@ -23,15 +44,17 @@ to any one provider** — run it against Claude or a local Ollama model.
 | Literature | `search_europepmc` | Europe PMC (incl. preprints) |
 | Conservation | `lookup_orthologs` | OrthoDB |
 
-The final report has fixed sections: **Identity, Annotation status, Structure,
-Network context, Expression/omics, Literature, Orthology, Coverage note**. The
-Coverage note is a machine-generated table of which sources returned data and
-which came up empty — so you can tell "genuinely unknown" from "not searched".
+The report has fixed sections: **Identity, Annotation status, Structure, Network
+context, Expression/omics, Literature, Orthology, Coverage note**. The Coverage
+note is a machine-generated table of which sources returned data and which came
+up empty — so you can tell "genuinely unknown" from "not searched".
 
 ## Install
 
 ```bash
-pip install -r requirements.txt   # just `requests`
+pip install -r requirements.txt    # just `requests`
+# or, to get the `adaseli` command on your PATH:
+pip install -e .
 ```
 
 The Anthropic backend talks to the Messages API over plain HTTP, so the
@@ -42,24 +65,48 @@ The Anthropic backend talks to the Messages API over plain HTTP, so the
 ```bash
 # Default: Synechocystis sp. PCC 6803, Claude Haiku
 export ANTHROPIC_API_KEY=sk-...
-python adaseli.py slr1634
+python -m adaseli slr1634
 
 # Use a local model instead — no key, no cloud
-python adaseli.py slr1634 --provider ollama --model llama3.1
+python -m adaseli slr1634 --provider ollama --model llama3.1
 
 # Switch to a stronger model for report quality
-python adaseli.py slr1634 --model claude-sonnet-4-6
+python -m adaseli slr1634 --model claude-sonnet-4-6
 
 # Any organism: override the ids (NCBI taxon / STRING species / KEGG code)
-python adaseli.py TP53 --organism-name "Homo sapiens" \
+python -m adaseli TP53 --organism-name "Homo sapiens" \
     --taxon 9606 --string-species 9606 --kegg-org hsa
 
 # Offline smoke test — no network, no model, no key needed
-python adaseli.py slr1634 --selftest
+python -m adaseli slr1634 --selftest
 ```
+
+(If you ran `pip install -e .`, use `adaseli ...` instead of `python -m adaseli ...`.)
 
 The report is written to `{gene}_report.md`. The agent prints each tool call and
 a one-line summary of what it returned so you can watch it work.
+
+## Connecting to Ollama
+
+1. Install Ollama and start the server: `ollama serve`
+2. Pull a tool-calling model: `ollama pull llama3.1`  (or `qwen2.5`, `mistral-nemo`, …)
+3. Confirm adaseli can reach it:
+
+   ```bash
+   python -m adaseli --check --provider ollama --model llama3.1
+   ```
+
+   On success it prints the host, the installed models, and `"ok": true`.
+   If the server isn't running it fails gracefully with a hint. Point at a
+   non-default host with `OLLAMA_HOST=http://my-box:11434`.
+4. Run it:
+
+   ```bash
+   python -m adaseli slr1634 --provider ollama --model llama3.1
+   ```
+
+> Tool calling quality varies by local model — use a model that supports tools
+> (llama3.1+, qwen2.5, mistral-nemo). Smaller models may need a couple of retries.
 
 ## Environment variables
 
@@ -76,4 +123,5 @@ a one-line summary of what it returned so you can watch it work.
   `{"error": ...}` and are recorded in the Coverage note rather than crashing.
 - `compute_hydrophobicity`'s transmembrane call is a Kyte-Doolittle heuristic,
   not a substitute for a dedicated predictor — it is labelled as such.
-- Default model is `claude-haiku-4-5-20251001`; pass `--model` to switch.
+- Default models: `claude-haiku-4-5-20251001` (anthropic), `llama3.1` (ollama);
+  pass `--model` to switch.
