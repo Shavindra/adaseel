@@ -122,11 +122,18 @@ free, tool-calling NVIDIA Nemotron models.
 export OPENROUTER_API_KEY=sk-or-v1-...           # never hardcode this
 python -m adaseli --check --provider openrouter  # validates the key + reachability
 
+# discover model ids (no key needed for listing)
+python -m adaseli --list-models --provider openrouter --filter nemotron --free --tools
+
 # run with the default free model, or pick another OpenRouter model id
 python -m adaseli slr1634 --provider openrouter
 python -m adaseli slr1634 --provider openrouter \
     --model nvidia/llama-3.1-nemotron-ultra-253b-v1:free
 ```
+
+`--list-models` queries OpenRouter's public catalogue and tags each model as
+`free`/`tools` so you can pick a current, tool-calling model without leaving the
+CLI. Combine `--filter <substring>`, `--free`, and `--tools` to narrow it.
 
 Override the gateway with `OPENROUTER_BASE_URL` if needed. The key is read only
 from the environment — it is never written to disk or committed.
