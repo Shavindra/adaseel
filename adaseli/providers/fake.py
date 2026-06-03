@@ -28,10 +28,22 @@ def make_fake_provider():
     state = {"i": 0}
 
     def provider(messages, tools):
-        # The final report turn passes tools=None; emit text and stop.
+        # Tool-free turns (tools=None) are the analysis and report agents. Peek at
+        # the last user message to emit role-appropriate offline text.
         if tools is None:
-            return {"text": "# selftest report\n\n(generated offline without a model)",
-                    "tool_calls": [], "raw": {"role": "assistant", "content": []}}
+            last = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    last = m.get("content") or ""
+                    break
+            if "RAW evidence" in last or "structured analysis" in last:
+                txt = ("Identity: (offline) | Annotation: see coverage | Structure: n/a | "
+                       "Network: n/a | Literature: none | Gaps: search ran offline.")
+            else:
+                txt = ("# selftest report\n\n## Identity\n(generated offline without a model)\n\n"
+                       "## Discussion\nPipeline wiring verified end to end.\n\n## Answer\n"
+                       "Offline self-test — no live data retrieved.")
+            return {"text": txt, "tool_calls": [], "raw": {"role": "assistant", "content": []}}
         i = state["i"]
         state["i"] += 1
         if i >= len(FAKE_SCRIPT):

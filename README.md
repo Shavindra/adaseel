@@ -1,22 +1,28 @@
 # adaseli
 
-An exhaustive, single-purpose **gene research agent**. Give it a gene and it
-queries many free public biological databases, keeps digging until it has tried
-every relevant source, and writes a structured Markdown report of *what is
-already known*. No hypothesis generation — pure retrieval + synthesis.
+An exhaustive **gene research pipeline**. Give it a gene and it queries many free
+public biological databases, keeps digging until it has tried every relevant
+source, then synthesises and writes a structured Markdown report of *what is
+already known* — and answers a question you pose about the gene.
 
-It is a small, readable, framework-free agent (functions, not classes). The LLM
-backend is **pluggable**, so you are not locked to any one provider — run it
-against Claude or a local Ollama model.
+It runs as **three cooperating agents**:
+
+1. **Search** — exhaustive retrieval: drives the tools until every source is tried.
+2. **Analysis** — reads the raw evidence and synthesises structured findings.
+3. **Report** — writes the report, a discussion, and a direct answer to your question.
+
+The LLM backend is **pluggable** (Anthropic, Ollama, OpenRouter), so you are not
+locked to any one provider. Progress is streamed with `rich`, and the CLI is built
+with `typer`.
 
 ## Package layout
 
 ```
 adaseli/
-  config.py            constants, organism defaults, prompts
+  config.py            constants, organism defaults, the three agent prompts
   http.py              one shared, fail-soft HTTP helper
-  agent.py             the research loop + report assembly
-  cli.py               argument parsing / entry point
+  feedback.py          rich progress output (stage banners, per-tool status)
+  cli.py               Typer command-line interface
   tools/               the nine data-source tools + registry/dispatcher
     sequence.py          UniProt, AlphaFold, hydrophobicity
     network.py           STRING, KEGG
@@ -25,10 +31,12 @@ adaseli/
     orthology.py         OrthoDB
     registry.py          tool schemas, dispatcher, summariser
   providers/           pluggable LLM backends
-    anthropic_provider.py   Claude over plain HTTP (no SDK needed)
+    anthropic_provider.py   Anthropic Messages API over plain HTTP (no SDK needed)
     ollama_provider.py      local models via /api/chat (+ connectivity check)
     openrouter_provider.py  OpenRouter (OpenAI-compatible; free Nemotron etc.)
-    fake.py                 offline provider used by --selftest
+    fake.py                 offline provider used by `selftest`
+  agents/              the pipeline
+    search.py · analysis.py · report.py · orchestrator.py · loop.py
 ```
 
 ## What it looks at
@@ -46,14 +54,15 @@ adaseli/
 | Conservation | `lookup_orthologs` | OrthoDB |
 
 The report has fixed sections: **Identity, Annotation status, Structure, Network
-context, Expression/omics, Literature, Orthology, Coverage note**. The Coverage
-note is a machine-generated table of which sources returned data and which came
-up empty — so you can tell "genuinely unknown" from "not searched".
+context, Expression/omics, Literature, Orthology, Discussion, Answer, Coverage
+note**. The Coverage note is a machine-generated table of which sources returned
+data and which came up empty — so you can tell "genuinely unknown" from "not
+searched".
 
 ## Install
 
 ```bash
-pip install -r requirements.txt    # just `requests`
+pip install -r requirements.txt    # requests, typer, rich
 # or, to get the `adaseli` command on your PATH:
 pip install -e .
 ```
@@ -63,33 +72,38 @@ The Anthropic backend talks to the Messages API over plain HTTP, so the
 
 ## Run
 
+The CLI has four commands: `research`, `check`, `models`, `selftest`.
+
 ```bash
-# Default: Synechocystis sp. PCC 6803, Claude Haiku
+# Default: Synechocystis sp. PCC 6803, anthropic backend
 export ANTHROPIC_API_KEY=sk-...
-python -m adaseli slr1634
+python -m adaseli research slr1634
+
+# Ask the report agent a specific question
+python -m adaseli research slr1634 -q "Is slr1634 a membrane protein, and what does it interact with?"
 
 # Use a local model instead — no key, no cloud
-python -m adaseli slr1634 --provider ollama --model llama3.1
+python -m adaseli research slr1634 --provider ollama --model llama3.1
 
 # Free hosted model via OpenRouter (NVIDIA Nemotron, supports tool calling)
 export OPENROUTER_API_KEY=sk-or-v1-...
-python -m adaseli slr1634 --provider openrouter   # defaults to nvidia/nemotron-nano-9b-v2:free
+python -m adaseli research slr1634 --provider openrouter   # nvidia/nemotron-nano-9b-v2:free
 
-# Switch to a stronger model for report quality
-python -m adaseli slr1634 --model claude-sonnet-4-6
+# Cheap model for search/analysis, a stronger one just for the written report
+python -m adaseli research slr1634 --model claude-haiku-4-5-20251001 --report-model claude-sonnet-4-6
 
 # Any organism: override the ids (NCBI taxon / STRING species / KEGG code)
-python -m adaseli TP53 --organism-name "Homo sapiens" \
+python -m adaseli research TP53 --organism-name "Homo sapiens" \
     --taxon 9606 --string-species 9606 --kegg-org hsa
 
 # Offline smoke test — no network, no model, no key needed
-python -m adaseli slr1634 --selftest
+python -m adaseli selftest slr1634
 ```
 
 (If you ran `pip install -e .`, use `adaseli ...` instead of `python -m adaseli ...`.)
 
-The report is written to `{gene}_report.md`. The agent prints each tool call and
-a one-line summary of what it returned so you can watch it work.
+The report is written to `{gene}_report.md`. Progress for each agent and tool is
+streamed to the terminal so you can watch the pipeline work (use `--quiet` to silence).
 
 ## Connecting to Ollama
 
@@ -98,7 +112,7 @@ a one-line summary of what it returned so you can watch it work.
 3. Confirm adaseli can reach it:
 
    ```bash
-   python -m adaseli --check --provider ollama --model llama3.1
+   python -m adaseli check --provider ollama --model llama3.1
    ```
 
    On success it prints the host, the installed models, and `"ok": true`.
@@ -107,7 +121,7 @@ a one-line summary of what it returned so you can watch it work.
 4. Run it:
 
    ```bash
-   python -m adaseli slr1634 --provider ollama --model llama3.1
+   python -m adaseli research slr1634 --provider ollama --model llama3.1
    ```
 
 > Tool calling quality varies by local model — use a model that supports tools
@@ -119,19 +133,19 @@ a one-line summary of what it returned so you can watch it work.
 free, tool-calling NVIDIA Nemotron models.
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-v1-...           # never hardcode this
-python -m adaseli --check --provider openrouter  # validates the key + reachability
+export OPENROUTER_API_KEY=sk-or-v1-...              # never hardcode this
+python -m adaseli check --provider openrouter       # validates the key + reachability
 
 # discover model ids (no key needed for listing)
-python -m adaseli --list-models --provider openrouter --filter nemotron --free --tools
+python -m adaseli models --provider openrouter --filter nemotron --free --tools
 
 # run with the default free model, or pick another OpenRouter model id
-python -m adaseli slr1634 --provider openrouter
-python -m adaseli slr1634 --provider openrouter \
+python -m adaseli research slr1634 --provider openrouter
+python -m adaseli research slr1634 --provider openrouter \
     --model nvidia/llama-3.1-nemotron-ultra-253b-v1:free
 ```
 
-`--list-models` queries OpenRouter's public catalogue and tags each model as
+The `models` command queries OpenRouter's public catalogue and tags each model as
 `free`/`tools` so you can pick a current, tool-calling model without leaving the
 CLI. Combine `--filter <substring>`, `--free`, and `--tools` to narrow it.
 
@@ -151,9 +165,11 @@ from the environment — it is never written to disk or committed.
 
 ## Notes
 
+- The three agents share one model by default; `--report-model` lets the writer
+  use a stronger model than search/analysis.
 - Every tool fails *soft*: timeouts, HTTP errors and missing entries become
   `{"error": ...}` and are recorded in the Coverage note rather than crashing.
 - `compute_hydrophobicity`'s transmembrane call is a Kyte-Doolittle heuristic,
   not a substitute for a dedicated predictor — it is labelled as such.
-- Default models: `claude-haiku-4-5-20251001` (anthropic), `llama3.1` (ollama);
-  pass `--model` to switch.
+- Default models: `claude-haiku-4-5-20251001` (anthropic), `llama3.1` (ollama),
+  `nvidia/nemotron-nano-9b-v2:free` (openrouter); pass `--model` to switch.

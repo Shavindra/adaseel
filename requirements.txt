@@ -1,4 +1,6 @@
 requests>=2.28
-# The Anthropic provider talks to the Messages API over plain HTTP (requests),
+typer>=0.12
+rich>=13.0
+# The Anthropic backend talks to the Messages API over plain HTTP (requests),
 # so the `anthropic` SDK is NOT required. Install it only if you prefer the SDK.
 # anthropic>=0.40

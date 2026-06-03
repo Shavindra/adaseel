@@ -1,166 +1,180 @@
 # -*- coding: utf-8 -*-
-"""Command-line interface / entry point for adaseli."""
+"""Typer command-line interface for adaseli.
+
+Commands:
+    research   run the 3-agent pipeline on a gene (optionally answering a question)
+    check      verify connectivity to a provider
+    models     list available models for a provider (OpenRouter catalogue)
+    selftest   run the whole pipeline offline (no network / no key / no model)
+"""
 
 import os
-import sys
 import json
-import argparse
+from enum import Enum
+from typing import Optional
+
+import typer
 
 from .config import DEFAULT_ORG, DEFAULT_MODELS
-from . import providers
-from .agent import run_agent
+from . import providers, feedback
+from .agents import run_pipeline
 
 
-def _build_parser():
-    p = argparse.ArgumentParser(
-        prog="adaseli",
-        description="adaseli — exhaustive multi-omics gene research agent",
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("gene", nargs="?", help="gene / locus tag, e.g. slr1634")
-    p.add_argument("--provider", choices=["anthropic", "ollama", "openrouter"],
-                   default="anthropic", help="LLM backend (default: anthropic)")
-    p.add_argument("--model", default=None,
-                   help="model id (default: %s for anthropic, %s for ollama)"
-                        % (DEFAULT_MODELS["anthropic"], DEFAULT_MODELS["ollama"]))
-    p.add_argument("--max-steps", type=int, default=14, help="max research turns")
-    p.add_argument("--out", default=None, help="output path (default: {gene}_report.md)")
-
-    # Organism: defaults to Synechocystis; override any field for other species.
-    p.add_argument("--organism-name", default=DEFAULT_ORG["name"])
-    p.add_argument("--taxon", default=DEFAULT_ORG["taxon"])
-    p.add_argument("--string-species", default=DEFAULT_ORG["string_species"])
-    p.add_argument("--kegg-org", default=DEFAULT_ORG["kegg_org"])
-
-    p.add_argument("--check", action="store_true",
-                   help="check connectivity to the selected provider (no research run) and exit")
-    p.add_argument("--list-models", action="store_true",
-                   help="list available OpenRouter models (use --filter / --free / --tools) and exit")
-    p.add_argument("--filter", default=None,
-                   help="with --list-models: only show ids containing this substring (e.g. nemotron)")
-    p.add_argument("--free", action="store_true",
-                   help="with --list-models: only show free models")
-    p.add_argument("--tools", action="store_true",
-                   help="with --list-models: only show models that support tool calling")
-    p.add_argument("--selftest", action="store_true",
-                   help="run the full pipeline offline with a fake model (no network/key needed)")
-    return p
+class Provider(str, Enum):
+    anthropic = "anthropic"
+    ollama = "ollama"
+    openrouter = "openrouter"
 
 
-def _do_check(provider, model):
-    """Handle `--check`: confirm we can talk to the chosen backend."""
-    if provider == "ollama":
+app = typer.Typer(add_completion=False, no_args_is_help=True,
+                  help="adaseli — exhaustive, multi-agent multi-omics gene research.")
+
+
+# --- shared option helpers -------------------------------------------------
+
+def _org(name, taxon, string_species, kegg_org):
+    return {"name": name, "taxon": taxon,
+            "string_species": string_species, "kegg_org": kegg_org}
+
+
+# Reusable organism options (Synechocystis defaults).
+_NAME = typer.Option(DEFAULT_ORG["name"], "--organism-name", help="organism scientific name")
+_TAXON = typer.Option(DEFAULT_ORG["taxon"], "--taxon", help="NCBI taxonomy id")
+_STRING = typer.Option(DEFAULT_ORG["string_species"], "--string-species", help="STRING species id")
+_KEGG = typer.Option(DEFAULT_ORG["kegg_org"], "--kegg-org", help="KEGG organism code")
+
+
+# --- research --------------------------------------------------------------
+
+@app.command()
+def research(
+    gene: str = typer.Argument(..., help="gene / locus tag, e.g. slr1634"),
+    question: Optional[str] = typer.Option(
+        None, "--question", "-q",
+        help="a specific question for the report agent to answer about the gene"),
+    provider: Provider = typer.Option(Provider.anthropic, "--provider", help="LLM backend"),
+    model: Optional[str] = typer.Option(None, "--model", help="model id (provider default if unset)"),
+    report_model: Optional[str] = typer.Option(
+        None, "--report-model",
+        help="optional stronger model for the report agent (e.g. a larger model)"),
+    max_steps: int = typer.Option(14, "--max-steps", help="max search-agent tool turns"),
+    out: Optional[str] = typer.Option(None, "--out", help="output path (default {gene}_report.md)"),
+    quiet: bool = typer.Option(False, "--quiet", help="suppress progress feedback"),
+    organism_name: str = _NAME, taxon: str = _TAXON,
+    string_species: str = _STRING, kegg_org: str = _KEGG,
+):
+    """Run search → analysis → report on GENE and save a Markdown report."""
+    feedback.configure(quiet=quiet)
+    model = model or DEFAULT_MODELS[provider.value]
+    _require_key(provider)
+    org = _org(organism_name, taxon, string_species, kegg_org)
+    run_pipeline(gene, org, provider.value, model, question=question,
+                 report_model=report_model, out_path=out, max_steps=max_steps)
+
+
+# --- check -----------------------------------------------------------------
+
+@app.command()
+def check(
+    provider: Provider = typer.Option(Provider.openrouter, "--provider", help="backend to check"),
+    model: Optional[str] = typer.Option(None, "--model", help="model id to verify (where supported)"),
+):
+    """Verify connectivity / credentials for a provider, then exit."""
+    model = model or DEFAULT_MODELS[provider.value]
+    if provider is Provider.ollama:
         info = providers.check_ollama(model)
-        print(json.dumps(info, indent=2))
-        if info.get("ok"):
-            print("\nOllama is reachable at %s." % info["host"])
-            print("Installed models: %s" % (", ".join(info["models"]) or "(none)"))
-            if model and not info.get("has_model", True):
-                print(info.get("hint", ""))
-                return 1
-            return 0
-        print("\nCould not reach Ollama: %s" % info.get("error"))
-        print(info.get("hint", ""))
-        return 1
-    if provider == "openrouter":
+    elif provider is Provider.openrouter:
         info = providers.check_openrouter(model)
-        print(json.dumps(info, indent=2))
-        if info.get("ok"):
-            print("\nOpenRouter key valid; gateway reachable at %s." % info["base_url"])
-            print("Default model for runs: %s" % model)
-            return 0
-        print("\nOpenRouter check failed: %s" % info.get("error"))
-        print(info.get("hint", ""))
-        return 1
-    # anthropic
-    info = providers.check_anthropic()
-    print(json.dumps(info, indent=2))
+    else:
+        info = providers.check_anthropic()
+    typer.echo(json.dumps(info, indent=2))
     if info.get("ok"):
-        print("\nAnthropic reachable at %s." % info["base_url"])
-        return 0
-    print("\nAnthropic check failed: %s" % info.get("error"))
-    return 1
+        typer.secho("\n%s reachable." % provider.value, fg=typer.colors.GREEN)
+        raise typer.Exit(0)
+    typer.secho("\n%s check failed: %s" % (provider.value, info.get("error")), fg=typer.colors.RED)
+    if info.get("hint"):
+        typer.echo(info["hint"])
+    raise typer.Exit(1)
 
 
-def _do_list_models(provider, name_filter, free_only, tools_only):
-    """Handle `--list-models`: print available models for the chosen provider."""
-    if provider == "ollama":
+# --- models ----------------------------------------------------------------
+
+@app.command()
+def models(
+    provider: Provider = typer.Option(Provider.openrouter, "--provider"),
+    filter: Optional[str] = typer.Option(None, "--filter", help="only ids containing this substring"),
+    free: bool = typer.Option(False, "--free", help="only free models"),
+    tools: bool = typer.Option(False, "--tools", help="only tool-calling models"),
+):
+    """List models available for a provider (OpenRouter catalogue / Ollama tags)."""
+    if provider is Provider.ollama:
         info = providers.check_ollama()
         if not info.get("ok"):
-            print("Could not reach Ollama: %s" % info.get("error"))
-            return 1
+            typer.secho("Could not reach Ollama: %s" % info.get("error"), fg=typer.colors.RED)
+            raise typer.Exit(1)
         for m in info["models"]:
-            print(m)
-        return 0
-    if provider == "anthropic":
-        print("Model listing isn't exposed for the anthropic provider. Common ids:")
+            typer.echo(m)
+        raise typer.Exit(0)
+    if provider is Provider.anthropic:
+        typer.echo("Common anthropic model ids:")
         for m in ("claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"):
-            print("  " + m)
-        return 0
-    # openrouter
-    info = providers.openrouter_list_models(name_filter=name_filter,
-                                            free_only=free_only, tools_only=tools_only)
+            typer.echo("  " + m)
+        raise typer.Exit(0)
+    info = providers.openrouter_list_models(name_filter=filter, free_only=free, tools_only=tools)
     if not info.get("ok"):
-        print("Could not list OpenRouter models: %s" % info.get("error"))
-        print(info.get("hint", ""))
-        return 1
-    flags = []
-    if name_filter:
-        flags.append("filter=%r" % name_filter)
-    if free_only:
-        flags.append("free")
-    if tools_only:
-        flags.append("tools")
-    print("OpenRouter models (%d)%s:"
-          % (info["count"], (" [" + ", ".join(flags) + "]") if flags else ""))
+        typer.secho("Could not list OpenRouter models: %s" % info.get("error"), fg=typer.colors.RED)
+        if info.get("hint"):
+            typer.echo(info["hint"])
+        raise typer.Exit(1)
+    flags = [f for f in (("filter=%r" % filter) if filter else None,
+                         "free" if free else None, "tools" if tools else None) if f]
+    typer.secho("OpenRouter models (%d)%s:" % (info["count"], (" [" + ", ".join(flags) + "]") if flags else ""),
+                fg=typer.colors.CYAN)
     for m in info["models"]:
-        tags = []
-        if m["is_free"]:
-            tags.append("free")
-        tags.append("tools" if m["supports_tools"] else "no-tools")
+        tags = (["free"] if m["is_free"] else []) + (["tools"] if m["supports_tools"] else ["no-tools"])
         ctx = ("%dk" % (m["context"] // 1000)) if m.get("context") else "?"
-        print("  %-55s ctx=%-5s %s" % (m["id"], ctx, ",".join(tags)))
+        typer.echo("  %-55s ctx=%-5s %s" % (m["id"], ctx, ",".join(tags)))
     if info["count"] == 0:
-        print("  (none matched — loosen the filters)")
-    return 0
+        typer.echo("  (none matched — loosen the filters)")
 
 
-def main(argv=None):
-    args = _build_parser().parse_args(argv)
-    model = args.model or DEFAULT_MODELS[args.provider]
+# --- selftest --------------------------------------------------------------
 
-    # --list-models: catalogue only, no gene required.
-    if args.list_models:
-        return _do_list_models(args.provider, args.filter, args.free, args.tools)
+@app.command()
+def selftest(
+    gene: str = typer.Argument("slr1634", help="gene to use for the offline run"),
+    question: Optional[str] = typer.Option(None, "--question", "-q"),
+    out: Optional[str] = typer.Option(None, "--out"),
+    quiet: bool = typer.Option(False, "--quiet", help="suppress progress feedback"),
+):
+    """Run the full pipeline offline with a fake model (no network/key needed)."""
+    feedback.configure(quiet=quiet)
+    from .providers.fake import make_fake_provider
+    providers.set_fake_provider(make_fake_provider())
+    org = _org(DEFAULT_ORG["name"], DEFAULT_ORG["taxon"],
+               DEFAULT_ORG["string_species"], DEFAULT_ORG["kegg_org"])
+    run_pipeline(gene, org, "fake", "(none)", question=question, out_path=out, max_steps=8)
 
-    # --check: connectivity only, no gene required.
-    if args.check:
-        return _do_check(args.provider, model)
 
-    org = {"name": args.organism_name, "taxon": args.taxon,
-           "string_species": args.string_species, "kegg_org": args.kegg_org}
+# --- helpers ---------------------------------------------------------------
 
-    # --selftest: offline pipeline with the fake provider.
-    if args.selftest:
-        from .providers.fake import make_fake_provider, FAKE_SCRIPT
-        providers.set_fake_provider(make_fake_provider())
-        gene = args.gene or "slr1634"
-        run_agent(gene, org, provider="fake", model="(none)",
-                  max_steps=len(FAKE_SCRIPT) + 1, out_path=args.out)
-        return 0
+def _require_key(provider):
+    if provider is Provider.anthropic and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.secho("error: ANTHROPIC_API_KEY is not set "
+                    "(or use --provider ollama/openrouter, or the selftest command)",
+                    fg=typer.colors.RED)
+        raise typer.Exit(1)
+    if provider is Provider.openrouter and not os.environ.get("OPENROUTER_API_KEY"):
+        typer.secho("error: OPENROUTER_API_KEY is not set "
+                    "(export it, e.g. `export OPENROUTER_API_KEY=sk-or-v1-...`)",
+                    fg=typer.colors.RED)
+        raise typer.Exit(1)
 
-    if not args.gene:
-        sys.exit("error: a gene argument is required (or use --check / --selftest)")
 
-    if args.provider == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
-        sys.exit("error: ANTHROPIC_API_KEY is not set (or use --provider ollama / --selftest)")
-    if args.provider == "openrouter" and not os.environ.get("OPENROUTER_API_KEY"):
-        sys.exit("error: OPENROUTER_API_KEY is not set "
-                 "(export it, e.g. `export OPENROUTER_API_KEY=sk-or-v1-...`)")
-
-    run_agent(args.gene, org, provider=args.provider, model=model,
-              max_steps=args.max_steps, out_path=args.out)
-    return 0
+def main():
+    """Console-script / `python -m adaseli` entry point."""
+    app()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
