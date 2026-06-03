@@ -16,6 +16,8 @@ and the package exposes two dispatch helpers used by the agent loop:
 from .anthropic_provider import (anthropic_step, anthropic_add_tool_results,
                                  check_anthropic)
 from .ollama_provider import ollama_step, ollama_add_tool_results, check_ollama
+from .openrouter_provider import (openrouter_step, openrouter_add_tool_results,
+                                  check_openrouter)
 from .fake import make_fake_provider
 
 # The offline self-test registers its closure here; "fake" provider dispatches to it.
@@ -34,6 +36,8 @@ def llm_step(provider, model, system, messages, tools, max_tokens=4096):
         return anthropic_step(model, system, messages, tools, max_tokens)
     if provider == "ollama":
         return ollama_step(model, system, messages, tools, max_tokens)
+    if provider == "openrouter":
+        return openrouter_step(model, system, messages, tools, max_tokens)
     if provider == "fake":
         if _fake_provider is None:
             return {"text": "", "tool_calls": [], "raw": None,
@@ -46,9 +50,11 @@ def add_tool_results(provider, messages, results):
     """Append tool results to the running message history in the backend's shape."""
     if provider == "ollama":
         ollama_add_tool_results(messages, results)
+    elif provider == "openrouter":
+        openrouter_add_tool_results(messages, results)
     else:  # anthropic and fake both use the anthropic shape
         anthropic_add_tool_results(messages, results)
 
 
-__all__ = ["llm_step", "add_tool_results", "set_fake_provider",
-           "make_fake_provider", "check_ollama", "check_anthropic"]
+__all__ = ["llm_step", "add_tool_results", "set_fake_provider", "make_fake_provider",
+           "check_ollama", "check_anthropic", "check_openrouter"]
