@@ -83,6 +83,15 @@ def openrouter_step(model, system, messages, tools, max_tokens):
     payload_msgs = [{"role": "system", "content": system}] + messages
     body = {"model": model, "messages": payload_msgs,
             "max_tokens": max_tokens, "temperature": 0.2}
+    # Reasoning models (nemotron-nano, deepseek-r1, gpt-oss, …) emit a long
+    # <think>…</think> trace before the tool_call. On tight budgets the closing
+    # tag itself gets cut, so no structured tool_calls arrive. Set
+    # ADASELI_NO_REASONING=1 (or ADASELI_REASONING_EFFORT={low,medium,high}) to
+    # ask OpenRouter to suppress / cap the trace.
+    if os.environ.get("ADASELI_NO_REASONING"):
+        body["reasoning"] = {"exclude": True}
+    elif os.environ.get("ADASELI_REASONING_EFFORT"):
+        body["reasoning"] = {"effort": os.environ["ADASELI_REASONING_EFFORT"]}
     if tools:
         body["tools"] = [{"type": "function",
                           "function": {"name": t["name"], "description": t["description"],
@@ -129,22 +138,29 @@ def openrouter_step(model, system, messages, tools, max_tokens):
     msg["content"] = text
     msg.setdefault("role", "assistant")
     finish = choices[0].get("finish_reason")
-    # Reasoning models put chain-of-thought in a `reasoning` field separate from `content`.
     reasoning = msg.get("reasoning") or msg.get("reasoning_content") or ""
     tool_calls = _parse_tool_calls(msg, text)
-    if not tool_calls and finish == "tool_calls":
+    looks_truncated_reasoning = (
+        reasoning and not tool_calls and not text and (
+            reasoning.rstrip().endswith("</think") or
+            (not reasoning.rstrip().endswith("</think>")
+             and finish in ("length", "stop", "tool_calls"))
+        )
+    )
+    if looks_truncated_reasoning:
+        log.error(
+            "REASONING MODEL TRUNCATED: %d chars of `reasoning`, content='', "
+            "tool_calls=[], finish_reason=%s. The <think>…</think> trace was cut off "
+            "before the structured tool_call. Fix: set ADASELI_NO_REASONING=1 (sends "
+            "reasoning.exclude to OpenRouter), bump max_tokens (currently %s), or pick "
+            "a non-reasoning model. Last reasoning chars: %r",
+            len(reasoning), finish, max_tokens, reasoning[-300:])
+    elif not tool_calls and finish == "tool_calls":
         log.error("finish_reason='tool_calls' but no tool calls parsed; raw:\n%s",
                   json.dumps(msg)[:2000])
     elif not tool_calls and not text:
-        if reasoning and finish in ("length", "stop"):
-            log.error("model emitted only `reasoning` (%d chars) with no content/tool_calls and "
-                      "finish_reason=%s — likely a reasoning model that ran out of tokens before "
-                      "emitting the tool call. Increase max_tokens (currently %s) or pick a "
-                      "non-reasoning model. Last reasoning chars: %r",
-                      len(reasoning), finish, max_tokens, reasoning[-300:])
-        else:
-            log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
-                        finish, json.dumps(msg)[:1000])
+        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
+                    finish, json.dumps(msg)[:1000])
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 
