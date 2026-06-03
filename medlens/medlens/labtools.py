@@ -99,7 +99,7 @@ def _docling_to_text(path):
     from docling.document_converter import DocumentConverter  # lazy, heavy
     try:
         from docling.datamodel.pipeline_options import PdfPipelineOptions
-        from docling.document_converter import PdfFormatOption
+        from docling.document_converter import PdfFormatOption, ImageFormatOption
         from docling.datamodel.base_models import InputFormat
         opts = PdfPipelineOptions()
         opts.do_ocr = True
@@ -108,11 +108,14 @@ def _docling_to_text(path):
             opts.ocr_options = SuryaOcrOptions()
             log("Docling: using Surya OCR engine")
         except Exception:
-            log("Docling: Surya options not found in this build; using default OCR engine")
+            log("Docling: Surya options not in this build; using Docling's default OCR engine")
+        # Images need ImageFormatOption (NOT PdfFormatOption); PDFs need PdfFormatOption.
         converter = DocumentConverter(format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=opts),
-            InputFormat.IMAGE: PdfFormatOption(pipeline_options=opts)})
-    except Exception:
+            InputFormat.IMAGE: ImageFormatOption(pipeline_options=opts)})
+    except Exception as e:
+        # Don't silently misconfigure — log why we're using the plain converter.
+        log("Docling option wiring failed (%s); using default DocumentConverter" % e)
         converter = DocumentConverter()
     return converter.convert(path).document.export_to_markdown()
 

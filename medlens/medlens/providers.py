@@ -23,6 +23,35 @@ def set_fake_provider(fn):
     _fake = fn
 
 
+def _describe_error(payload):
+    """Build a DETAILED description of an OpenAI/OpenRouter-style error payload.
+
+    OpenRouter wraps the real upstream failure in error.metadata (provider name +
+    the provider's raw error). We surface all of it plus the full payload, so the
+    actual reason is never swallowed."""
+    if not isinstance(payload, dict):
+        return str(payload)[:2000]
+    err = payload.get("error", payload)
+    if isinstance(err, str):
+        return err
+    parts = []
+    for k in ("code", "type"):
+        if err.get(k) is not None:
+            parts.append("%s=%s" % (k, err.get(k)))
+    if err.get("message"):
+        parts.append(str(err["message"]))
+    meta = err.get("metadata") or {}
+    if isinstance(meta, dict):
+        if meta.get("provider_name"):
+            parts.append("provider=%s" % meta["provider_name"])
+        raw = meta.get("raw") or meta.get("raw_error")
+        if raw:
+            parts.append("raw=%s" % (raw if isinstance(raw, str) else json.dumps(raw))[:1000])
+    desc = " | ".join(parts)
+    full = json.dumps(payload)[:2000]
+    return ("%s\n  full payload: %s" % (desc, full)) if desc else full
+
+
 def chat(cfg, messages, tools=None):
     """One model turn. Returns {text, tool_calls:[{id,name,input}], raw, error?}.
 
@@ -45,31 +74,43 @@ def chat(cfg, messages, tools=None):
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.RequestException as e:
-        detail = ""
+        # Surface the FULL response body (parsed if it's a structured error).
+        body = ""
         try:
-            detail = " — " + e.response.text[:300]
+            body = e.response.text
         except Exception:
             pass
-        log.error("LLM request failed: %s%s", e, detail)
+        detail = body
+        try:
+            detail = _describe_error(json.loads(body))
+        except Exception:
+            pass
+        log.error("LLM HTTP request failed: %s\n%s", e, detail)
         return {"text": "", "tool_calls": [], "raw": None,
-                "error": "LLM request failed: %s%s" % (e, detail)}
+                "error": "LLM HTTP request failed: %s\n%s" % (e, detail)}
 
-    log.debug("LLM raw response: %s", json.dumps(data)[:1000])
+    log.debug("LLM raw response: %s", json.dumps(data)[:2000])
 
     # Some OpenAI-compatible gateways (OpenRouter included) return HTTP 200 with an
-    # error object or an empty body instead of a normal completion. Surface it
-    # rather than silently producing "no tool calls".
+    # error object or an empty body instead of a completion. Trace it in full —
+    # never reduce it to a one-line summary.
     if isinstance(data, dict) and data.get("error") and not data.get("choices"):
-        err = data["error"]
-        msg = err.get("message") if isinstance(err, dict) else str(err)
-        log.error("LLM returned an error payload: %s", msg)
-        return {"text": "", "tool_calls": [], "raw": None, "error": "LLM error: %s" % msg}
+        detail = _describe_error(data)
+        log.error("LLM returned an error payload:\n%s", detail)
+        return {"text": "", "tool_calls": [], "raw": None, "error": "LLM error: %s" % detail}
     if not (isinstance(data, dict) and data.get("choices")):
+        detail = json.dumps(data)[:2000] if isinstance(data, dict) else str(data)[:2000]
+        log.error("LLM returned no choices:\n%s", detail)
         return {"text": "", "tool_calls": [], "raw": None,
-                "error": "LLM returned no choices: %s" % (json.dumps(data)[:300])}
+                "error": "LLM returned no choices: %s" % detail}
 
     msg = data["choices"][0].get("message", {}) or {}
     text = msg.get("content") or ""
+    # Normalise so the assistant message is valid when re-sent next turn (some
+    # OpenAI-compatible servers reject content=null).
+    msg["content"] = text
+    msg.setdefault("role", "assistant")
+    finish = data["choices"][0].get("finish_reason")
     tool_calls = []
     for tc in msg.get("tool_calls", []) or []:
         fn = tc.get("function", {})
@@ -80,6 +121,8 @@ def chat(cfg, messages, tools=None):
             except ValueError:
                 a = {}
         tool_calls.append({"id": tc.get("id"), "name": fn.get("name"), "input": a})
+    if not tool_calls and not text:
+        log.warning("model returned empty message (finish_reason=%s)", finish)
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 
