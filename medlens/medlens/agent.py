@@ -27,8 +27,24 @@ def run_review(cfg, input_path, out_path, max_steps=8):
     last_text = ""
 
     for step in range(1, max_steps + 1):
-        with feedback.working("agent deciding next step"):
-            s = providers.chat(cfg, messages, TOOL_SCHEMAS)
+        # Bail before the next LLM call if the report has already been saved.
+        if ctx.get("saved"):
+            break
+
+        # tool_choice strategy: turn 1 forces extract_lab_report (it's always the
+        # first step — no point letting the model 'decide'); subsequent turns use
+        # 'required' so the model MUST emit a tool call (no reasoning chatter).
+        # This means reasoning models can't burn their token budget thinking
+        # before acting — the API guarantees they emit a tool call.
+        if step == 1:
+            choice = "extract_lab_report"
+        elif not ctx.get("saved"):
+            choice = "required"
+        else:
+            choice = "auto"
+
+        with feedback.working("agent deciding next step (tool_choice=%s)" % choice):
+            s = providers.chat(cfg, messages, TOOL_SCHEMAS, tool_choice=choice)
         if s.get("error"):
             feedback.error(s["error"])
             return None
@@ -38,7 +54,7 @@ def run_review(cfg, input_path, out_path, max_steps=8):
             last_text = s["text"]
             feedback.thinking(s["text"])
         if not s["tool_calls"]:
-            break  # agent has nothing more to do
+            break  # agent has nothing more to do (only reachable on tool_choice='auto')
 
         results = []
         for tc in s["tool_calls"]:

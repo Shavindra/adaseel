@@ -52,10 +52,29 @@ def _describe_error(payload):
     return ("%s\n  full payload: %s" % (desc, full)) if desc else full
 
 
-def chat(cfg, messages, tools=None):
+def _resolve_tool_choice(choice):
+    """Turn a friendly value into the OpenAI tool_choice shape.
+    None / "auto" -> "auto"; "required" -> "required"; a function name string
+    -> {"type":"function","function":{"name":...}} (forces that exact tool);
+    dict -> passed through (advanced)."""
+    if choice is None or choice == "auto":
+        return "auto"
+    if choice == "required" or choice == "none":
+        return choice
+    if isinstance(choice, str):
+        return {"type": "function", "function": {"name": choice}}
+    return choice
+
+
+def chat(cfg, messages, tools=None, tool_choice=None):
     """One model turn. Returns {text, tool_calls:[{id,name,input}], raw, error?}.
 
     `cfg` is a dict with base_url, model, api_key (and optional 'fake': True).
+    `tool_choice` overrides the default behaviour:
+      * None      -> default ("auto"): model decides whether to call a tool
+      * "auto"    -> same; model decides
+      * "required"-> model MUST call SOME tool (no reasoning chatter allowed)
+      * "<name>"  -> model MUST call that specific function (no choice at all)
     """
     if cfg.get("fake"):
         if _fake is None:
@@ -65,18 +84,13 @@ def chat(cfg, messages, tools=None):
     url = cfg["base_url"].rstrip("/") + "/chat/completions"
     body = {"model": cfg["model"], "messages": messages, "temperature": 0.2,
             "max_tokens": cfg.get("max_tokens", 8192)}
-    # Reasoning models (nemotron-nano, gpt-oss, deepseek-r1, etc.) emit a long
-    # <think>...</think> trace BEFORE the tool call, and on tight budgets the
-    # closing tag itself gets cut off — leaving content="", tool_calls=[], even
-    # when the model intended to call a tool. OpenRouter's `reasoning.exclude`
-    # tells the gateway to suppress the trace so the structured tool_call arrives.
     if cfg.get("no_reasoning"):
         body["reasoning"] = {"exclude": True}
     elif cfg.get("reasoning_effort"):
         body["reasoning"] = {"effort": cfg["reasoning_effort"]}
     if tools:
         body["tools"] = tools
-        body["tool_choice"] = "auto"
+        body["tool_choice"] = _resolve_tool_choice(tool_choice)
     headers = {"Authorization": "Bearer %s" % cfg.get("api_key", ""),
                "Content-Type": "application/json"}
     try:
