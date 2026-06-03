@@ -63,7 +63,11 @@ def chat(cfg, messages, tools=None):
         return _fake(messages, tools)
 
     url = cfg["base_url"].rstrip("/") + "/chat/completions"
-    body = {"model": cfg["model"], "messages": messages, "temperature": 0.2}
+    # Give reasoning models (e.g. nemotron-nano, gpt-oss, etc.) room to actually
+    # finish reasoning AND emit the tool call — without max_tokens many upstream
+    # defaults cut them off mid-thought, leaving content="" and no tool_calls.
+    body = {"model": cfg["model"], "messages": messages, "temperature": 0.2,
+            "max_tokens": cfg.get("max_tokens", 4096)}
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
@@ -111,16 +115,27 @@ def chat(cfg, messages, tools=None):
     msg["content"] = text
     msg.setdefault("role", "assistant")
     finish = data["choices"][0].get("finish_reason")
+    # Reasoning models put their chain-of-thought in a separate `reasoning` field;
+    # surface it in diagnostics so a truncated reasoning trace is visible.
+    reasoning = msg.get("reasoning") or msg.get("reasoning_content") or ""
     tool_calls = _parse_tool_calls(msg, text)
+
     if not tool_calls and finish == "tool_calls":
-        # The model SAID it called tools but our parser found none. Dump the full
-        # raw assistant message so the user sees the actual shape it emitted —
-        # different providers nest tool calls in subtly different ways.
-        log.error("finish_reason='tool_calls' but no tool calls parsed; raw message:\n%s",
+        log.error("finish_reason='tool_calls' but no tool calls parsed; raw:\n%s",
                   json.dumps(msg)[:2000])
     elif not tool_calls and not text:
-        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
-                    finish, json.dumps(msg)[:1000])
+        # The specific case we hit live: a reasoning model burnt its budget
+        # in `reasoning` and got cut off (finish_reason=length) before emitting
+        # the tool call. Call this out explicitly — it's the actionable diagnosis.
+        if reasoning and finish in ("length", "stop"):
+            log.error("model emitted only `reasoning` (%d chars) with no content/tool_calls and "
+                      "finish_reason=%s — looks like a reasoning model that ran out of tokens "
+                      "before emitting the tool call. Increase --max-tokens (currently %s), or "
+                      "pick a non-reasoning model. Last reasoning chars: %r",
+                      len(reasoning), finish, body.get("max_tokens"), reasoning[-300:])
+        else:
+            log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
+                        finish, json.dumps(msg)[:1000])
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 

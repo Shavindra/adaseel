@@ -43,8 +43,9 @@ def _setup_logging(verbose, log_file=None):
         logger.addHandler(fh)
 
 
-def _cfg(base_url, model, api_key, fake=False):
-    return {"base_url": base_url, "model": model, "api_key": api_key, "fake": fake}
+def _cfg(base_url, model, api_key, fake=False, max_tokens=4096):
+    return {"base_url": base_url, "model": model, "api_key": api_key,
+            "fake": fake, "max_tokens": max_tokens}
 
 
 def _ensure_sample():
@@ -61,6 +62,8 @@ def review(
     api_key: str = typer.Option(DEFAULT_API_KEY, "--api-key", help="API key (ignored by Ollama)"),
     out: Optional[str] = typer.Option(None, "--out", help="report path (default lab_report_review.md)"),
     max_steps: int = typer.Option(8, "--max-steps", help="max agent turns"),
+    max_tokens: int = typer.Option(4096, "--max-tokens",
+                                   help="per-turn token budget — bump for reasoning models"),
     quiet: bool = typer.Option(False, "--quiet"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="show debug logs"),
     log_file: Optional[str] = typer.Option(None, "--log-file"),
@@ -70,7 +73,8 @@ def review(
     _setup_logging(verbose, log_file)
     input_path = input or _ensure_sample()
     out_path = out or labtools.DEFAULT_OUT
-    run_review(_cfg(base_url, model, api_key), input_path, out_path, max_steps=max_steps)
+    run_review(_cfg(base_url, model, api_key, max_tokens=max_tokens),
+               input_path, out_path, max_steps=max_steps)
 
 
 @app.command()
