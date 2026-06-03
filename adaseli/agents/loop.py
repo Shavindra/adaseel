@@ -24,11 +24,16 @@ def run_tool_loop(provider, model, system, user_msg, org, ctx, max_steps=14):
     messages = [{"role": "user", "content": user_msg}]
 
     for step in range(1, max_steps + 1):
-        with feedback.working("agent %s deciding next step" % provider):
-            # Generous token budget so reasoning models have room to finish
-            # reasoning AND emit a tool call in the same turn.
+        # The canonical first call is lookup_uniprot — it primes the accession +
+        # sequence the other tools reuse. There's no upside to letting the model
+        # "decide" the first step (and reasoning models burn tokens doing so).
+        # Force it via tool_choice on turn 1; subsequent turns are "auto" so the
+        # model can stop when its research is done.
+        choice = "lookup_uniprot" if step == 1 else "auto"
+        label = "%s deciding next step (tool_choice=%s)" % (provider, choice)
+        with feedback.working(label):
             s = providers.llm_step(provider, model, system, messages, TOOL_SCHEMAS,
-                                   max_tokens=8192)
+                                   max_tokens=8192, tool_choice=choice)
         if s.get("error"):
             feedback.error(s["error"])
             return collected, s["error"]

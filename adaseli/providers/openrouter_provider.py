@@ -73,7 +73,18 @@ def _describe_error(payload):
     return ("%s\n  full payload: %s" % (desc, full)) if desc else full
 
 
-def openrouter_step(model, system, messages, tools, max_tokens):
+def _resolve_tool_choice(choice):
+    """Turn a friendly value into OpenAI's tool_choice shape."""
+    if choice is None or choice == "auto":
+        return "auto"
+    if choice in ("required", "none"):
+        return choice
+    if isinstance(choice, str):
+        return {"type": "function", "function": {"name": choice}}
+    return choice
+
+
+def openrouter_step(model, system, messages, tools, max_tokens, tool_choice=None):
     """Run one OpenRouter turn; return normalised {text, tool_calls, raw}."""
     if not os.environ.get("OPENROUTER_API_KEY"):
         return {"text": "", "tool_calls": [], "raw": None,
@@ -96,7 +107,7 @@ def openrouter_step(model, system, messages, tools, max_tokens):
         body["tools"] = [{"type": "function",
                           "function": {"name": t["name"], "description": t["description"],
                                        "parameters": t["parameters"]}} for t in tools]
-        body["tool_choice"] = "auto"
+        body["tool_choice"] = _resolve_tool_choice(tool_choice)
     try:
         resp = requests.post(_base() + "/chat/completions", headers=_headers(),
                              data=json.dumps(body), timeout=180)

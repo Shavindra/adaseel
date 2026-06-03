@@ -15,7 +15,18 @@ import requests
 log = logging.getLogger(__name__)
 
 
-def _messages_call(model, system, messages, tools, max_tokens):
+def _resolve_tool_choice_anthropic(choice):
+    """Anthropic uses a different shape: {type: auto|any|tool, name?: <fn>}."""
+    if choice is None or choice == "auto":
+        return {"type": "auto"}
+    if choice == "required":
+        return {"type": "any"}
+    if isinstance(choice, str):
+        return {"type": "tool", "name": choice}
+    return choice
+
+
+def _messages_call(model, system, messages, tools, max_tokens, tool_choice=None):
     """One raw call to Claude's Messages API. Returns the JSON dict or {"error":..}."""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -31,6 +42,8 @@ def _messages_call(model, system, messages, tools, max_tokens):
                    "input_schema": t["parameters"]} for t in tools]
         atools[-1]["cache_control"] = {"type": "ephemeral"}
         body["tools"] = atools
+        if tool_choice is not None:
+            body["tool_choice"] = _resolve_tool_choice_anthropic(tool_choice)
     try:
         resp = requests.post(base + "/v1/messages", headers=headers,
                              data=json.dumps(body), timeout=120)
@@ -46,9 +59,9 @@ def _messages_call(model, system, messages, tools, max_tokens):
         return {"error": "anthropic request failed: %s%s" % (e, detail)}
 
 
-def anthropic_step(model, system, messages, tools, max_tokens):
+def anthropic_step(model, system, messages, tools, max_tokens, tool_choice=None):
     """Run one Claude turn; return normalised {text, tool_calls, raw}."""
-    data = _messages_call(model, system, messages, tools, max_tokens)
+    data = _messages_call(model, system, messages, tools, max_tokens, tool_choice)
     if isinstance(data, dict) and "error" in data:
         return {"text": "", "tool_calls": [], "raw": None, "error": data["error"]}
     text, tool_calls = "", []

@@ -31,14 +31,20 @@ def set_fake_provider(fn):
     _fake_provider = fn
 
 
-def llm_step(provider, model, system, messages, tools, max_tokens=4096):
-    """Run one model turn with the selected backend."""
+def llm_step(provider, model, system, messages, tools, max_tokens=4096, tool_choice=None):
+    """Run one model turn with the selected backend.
+
+    `tool_choice` (forwarded to providers that support it):
+      * None / "auto" -> model decides
+      * "required"    -> model MUST emit some tool call (no chatter)
+      * "<name>"      -> model MUST emit that exact function call
+    """
     if provider == "anthropic":
-        return anthropic_step(model, system, messages, tools, max_tokens)
+        return anthropic_step(model, system, messages, tools, max_tokens, tool_choice)
     if provider == "ollama":
         return ollama_step(model, system, messages, tools, max_tokens)
     if provider == "openrouter":
-        return openrouter_step(model, system, messages, tools, max_tokens)
+        return openrouter_step(model, system, messages, tools, max_tokens, tool_choice)
     if provider == "fake":
         if _fake_provider is None:
             return {"text": "", "tool_calls": [], "raw": None,
