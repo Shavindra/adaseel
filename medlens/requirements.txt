@@ -1,0 +1,16 @@
+# MEDLENS dependencies.
+#
+# Always needed:
+requests>=2.28
+pillow>=9.0          # renders the synthetic sample image
+
+# OCR stack (Stage 1, local). Heavy (pulls in torch + downloads models on first
+# use). If absent, MEDLENS falls back to a text transcript so the pipeline still
+# runs for testing.
+docling>=2.0
+surya-ocr>=0.6
+
+# Reasoning stage (Stage 3) talks to any OpenAI-compatible endpoint over plain
+# HTTP via `requests`, so the OpenAI SDK is optional. Install it only if you
+# prefer to swap the client implementation.
+# openai>=1.0
