@@ -10,6 +10,7 @@ Commands:
 
 import os
 import json
+import logging
 from enum import Enum
 from typing import Optional
 
@@ -18,6 +19,35 @@ import typer
 from .config import DEFAULT_ORG, DEFAULT_MODELS
 from . import providers, feedback
 from .agents import run_pipeline
+
+
+def setup_logging(verbose=False, log_file=None):
+    """Configure the 'adaseli' logger. Console shows WARNING+ by default (so HTTP
+    failures and transport errors surface), or everything with --verbose. A
+    --log-file always captures full DEBUG detail. Logs go to stderr so they don't
+    tangle with the spinner/feedback on stdout."""
+    logger = logging.getLogger("adaseli")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    try:
+        from rich.logging import RichHandler
+        from rich.console import Console
+        handler = RichHandler(console=Console(stderr=True), show_path=False,
+                              rich_tracebacks=True, markup=False)
+    except Exception:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    logger.addHandler(handler)
+
+    if log_file:
+        fh = logging.FileHandler(log_file)
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(fh)
+        logger.debug("logging to %s", log_file)
 
 
 class Provider(str, Enum):
@@ -60,11 +90,14 @@ def research(
     max_steps: int = typer.Option(14, "--max-steps", help="max search-agent tool turns"),
     out: Optional[str] = typer.Option(None, "--out", help="output path (default {gene}_report.md)"),
     quiet: bool = typer.Option(False, "--quiet", help="suppress progress feedback"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="show detailed debug logs (URLs, HTTP bodies)"),
+    log_file: Optional[str] = typer.Option(None, "--log-file", help="also write full debug logs to this file"),
     organism_name: str = _NAME, taxon: str = _TAXON,
     string_species: str = _STRING, kegg_org: str = _KEGG,
 ):
     """Run search → analysis → report on GENE and save a Markdown report."""
     feedback.configure(quiet=quiet)
+    setup_logging(verbose=verbose, log_file=log_file)
     model = model or DEFAULT_MODELS[provider.value]
     _require_key(provider)
     org = _org(organism_name, taxon, string_species, kegg_org)
@@ -78,8 +111,10 @@ def research(
 def check(
     provider: Provider = typer.Option(Provider.openrouter, "--provider", help="backend to check"),
     model: Optional[str] = typer.Option(None, "--model", help="model id to verify (where supported)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="show detailed debug logs"),
 ):
     """Verify connectivity / credentials for a provider, then exit."""
+    setup_logging(verbose=verbose)
     model = model or DEFAULT_MODELS[provider.value]
     if provider is Provider.ollama:
         info = providers.check_ollama(model)
@@ -146,9 +181,12 @@ def selftest(
     question: Optional[str] = typer.Option(None, "--question", "-q"),
     out: Optional[str] = typer.Option(None, "--out"),
     quiet: bool = typer.Option(False, "--quiet", help="suppress progress feedback"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="show detailed debug logs"),
+    log_file: Optional[str] = typer.Option(None, "--log-file", help="also write full debug logs to this file"),
 ):
     """Run the full pipeline offline with a fake model (no network/key needed)."""
     feedback.configure(quiet=quiet)
+    setup_logging(verbose=verbose, log_file=log_file)
     from .providers.fake import make_fake_provider
     providers.set_fake_provider(make_fake_provider())
     org = _org(DEFAULT_ORG["name"], DEFAULT_ORG["taxon"],

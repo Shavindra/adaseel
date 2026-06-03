@@ -12,8 +12,11 @@ Base URL: OPENROUTER_BASE_URL (default https://openrouter.ai/api/v1).
 
 import os
 import json
+import logging
 
 import requests
+
+log = logging.getLogger(__name__)
 
 
 def _base():
@@ -72,6 +75,7 @@ def openrouter_step(model, system, messages, tools, max_tokens):
         hint = key_hint()
         if hint:
             detail += " [%s]" % hint
+        log.error("openrouter /chat/completions failed: %s%s", e, detail)
         return {"text": "", "tool_calls": [], "raw": None,
                 "error": "openrouter request failed: %s%s" % (e, detail)}
 

@@ -105,7 +105,18 @@ python -m adaseli selftest slr1634
 (If you ran `pip install -e .`, use `adaseli ...` instead of `python -m adaseli ...`.)
 
 The report is written to `{gene}_report.md`. Progress for each agent and tool is
-streamed to the terminal so you can watch the pipeline work (use `--quiet` to silence).
+streamed to the terminal — a spinner animates while it waits on the model and each
+API — so you can watch the pipeline work (`--quiet` to silence it).
+
+### Seeing errors / logs
+
+Per-source failures (timeouts, HTTP errors with status + response body, transport
+errors) are logged to stderr and visible by default. For full detail add `-v`:
+
+```bash
+python -m adaseli research slr1634 -v                 # debug logs: every request URL + body
+python -m adaseli research slr1634 --log-file run.log # also capture full debug logs to a file
+```
 
 ## Connecting to Ollama
 

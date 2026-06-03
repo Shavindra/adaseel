@@ -8,8 +8,11 @@ Set OLLAMA_HOST to point elsewhere (default http://localhost:11434). Use
 
 import os
 import json
+import logging
 
 import requests
+
+log = logging.getLogger(__name__)
 
 
 def _host():
@@ -31,6 +34,7 @@ def ollama_step(model, system, messages, tools, max_tokens):
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.RequestException as e:
+        log.error("ollama /api/chat failed: %s", e)
         return {"text": "", "tool_calls": [], "raw": None, "error": "ollama request failed: %s" % e}
 
     msg = data.get("message", {})

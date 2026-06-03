@@ -24,7 +24,8 @@ def run_tool_loop(provider, model, system, user_msg, org, ctx, max_steps=14):
     messages = [{"role": "user", "content": user_msg}]
 
     for step in range(1, max_steps + 1):
-        s = providers.llm_step(provider, model, system, messages, TOOL_SCHEMAS)
+        with feedback.working("agent %s deciding next step" % provider):
+            s = providers.llm_step(provider, model, system, messages, TOOL_SCHEMAS)
         if s.get("error"):
             feedback.error(s["error"])
             return collected, s["error"]
@@ -38,7 +39,8 @@ def run_tool_loop(provider, model, system, user_msg, org, ctx, max_steps=14):
         results = []
         for tc in s["tool_calls"]:
             feedback.tool_call(tc["name"], tc["input"])
-            res = run_tool(tc["name"], tc["input"], ctx, org)
+            with feedback.working("querying %s" % tc["name"]):
+                res = run_tool(tc["name"], tc["input"], ctx, org)
             collected[tc["name"]] = res
             feedback.tool_result(tc["name"], summarize_result(tc["name"], res), not is_err(res))
             # Bound the payload so we never blow up the context window.
@@ -50,10 +52,11 @@ def run_tool_loop(provider, model, system, user_msg, org, ctx, max_steps=14):
     return collected, None
 
 
-def run_completion(provider, model, system, user_msg, max_tokens=8000):
+def run_completion(provider, model, system, user_msg, max_tokens=8000, label="agent writing"):
     """A single tool-free model call. Returns (text, error)."""
     messages = [{"role": "user", "content": user_msg}]
-    s = providers.llm_step(provider, model, system, messages, tools=None, max_tokens=max_tokens)
+    with feedback.working(label):
+        s = providers.llm_step(provider, model, system, messages, tools=None, max_tokens=max_tokens)
     if s.get("error"):
         feedback.error(s["error"])
         return None, s["error"]

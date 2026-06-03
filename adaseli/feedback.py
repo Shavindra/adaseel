@@ -9,6 +9,7 @@ Call ``configure(quiet=...)`` to silence everything (e.g. in tests).
 """
 
 import json
+from contextlib import contextmanager
 
 try:
     from rich.console import Console
@@ -19,6 +20,21 @@ except Exception:  # rich not installed — fall back to plain printing
     _console = None
 
 _QUIET = False
+
+
+@contextmanager
+def working(message):
+    """Show an animated spinner while a blocking call (LLM / network) runs.
+
+    Used as ``with feedback.working("lookup_uniprot"): ...``. No-op when output is
+    quiet or rich is unavailable. Spinners are never nested, so a single live
+    display is safe.
+    """
+    if _QUIET or _console is None:
+        yield
+        return
+    with _console.status("[dim]%s…[/dim]" % message, spinner="dots"):
+        yield
 
 
 def configure(quiet=False):

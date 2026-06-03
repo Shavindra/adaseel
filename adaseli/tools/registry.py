@@ -8,8 +8,11 @@ copy a long sequence back through its tool call.
 """
 
 import json
+import logging
 
 from .. import http
+
+log = logging.getLogger(__name__)
 from .sequence import lookup_uniprot, lookup_alphafold, compute_hydrophobicity
 from .network import search_string, lookup_kegg
 from .expression import search_geo
@@ -132,6 +135,7 @@ def run_tool(name, args, ctx, org):
 
         return {"error": "unknown tool %r" % name}
     except Exception as e:  # defensive: a tool bug must not crash the agent
+        log.exception("tool %s raised an unexpected error", name)
         return {"error": "tool %s raised %s: %s" % (name, type(e).__name__, e)}
 
 

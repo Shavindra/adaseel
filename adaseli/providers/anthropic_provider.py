@@ -8,8 +8,11 @@ for prompt caching to cut cost/latency across the many turns of the loop.
 
 import os
 import json
+import logging
 
 import requests
+
+log = logging.getLogger(__name__)
 
 
 def _messages_call(model, system, messages, tools, max_tokens):
@@ -39,6 +42,7 @@ def _messages_call(model, system, messages, tools, max_tokens):
             detail = " — " + e.response.text[:300]
         except Exception:
             pass
+        log.error("anthropic /v1/messages failed: %s%s", e, detail)
         return {"error": "anthropic request failed: %s%s" % (e, detail)}
 
 
