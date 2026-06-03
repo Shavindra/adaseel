@@ -74,9 +74,12 @@ def run_review(cfg, input_path, out_path, max_steps=8):
         feedback.error("the model returned no tool calls, so nothing was extracted.")
         if last_text:
             feedback.note("model said: %s" % last_text[:300])
-        feedback.note("This model's endpoint may not support tool calling. The model is your "
-                      "choice (--model); list ones that can drive the agent with "
-                      "`medlens models --free --tools`. Run with -v to see the raw response.")
+        feedback.note("Either this model/provider didn't emit a parseable tool call (the raw "
+                      "assistant message was logged at ERROR above), or its endpoint doesn't "
+                      "support tool calling. The model is your choice — known-good free "
+                      "OpenRouter options that advertise tool support include "
+                      "meta-llama/llama-3.3-70b-instruct:free, qwen/qwen3-coder:free, and "
+                      "openai/gpt-oss-120b:free. Run with -v for full traces.")
     else:
         feedback.error("no report produced.")
     return None

@@ -111,19 +111,70 @@ def chat(cfg, messages, tools=None):
     msg["content"] = text
     msg.setdefault("role", "assistant")
     finish = data["choices"][0].get("finish_reason")
-    tool_calls = []
-    for tc in msg.get("tool_calls", []) or []:
-        fn = tc.get("function", {})
-        a = fn.get("arguments", {})
-        if isinstance(a, str):
-            try:
-                a = json.loads(a or "{}")
-            except ValueError:
-                a = {}
-        tool_calls.append({"id": tc.get("id"), "name": fn.get("name"), "input": a})
-    if not tool_calls and not text:
-        log.warning("model returned empty message (finish_reason=%s)", finish)
+    tool_calls = _parse_tool_calls(msg, text)
+    if not tool_calls and finish == "tool_calls":
+        # The model SAID it called tools but our parser found none. Dump the full
+        # raw assistant message so the user sees the actual shape it emitted —
+        # different providers nest tool calls in subtly different ways.
+        log.error("finish_reason='tool_calls' but no tool calls parsed; raw message:\n%s",
+                  json.dumps(msg)[:2000])
+    elif not tool_calls and not text:
+        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
+                    finish, json.dumps(msg)[:1000])
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
+
+
+def _parse_tool_calls(msg, text):
+    """Extract tool calls from an assistant message, tolerantly.
+
+    Handles three shapes we've seen in the wild:
+      * standard OpenAI: msg["tool_calls"] = [{id,function:{name,arguments}}]
+      * flat: tool_calls = [{id,name,arguments}]  (some Ollama/free providers)
+      * embedded in content: a JSON blob like {"tool_calls":[...]} or
+        {"name":..,"arguments":..} when the provider can't emit structured calls
+    """
+    out = []
+    raw_calls = msg.get("tool_calls") or []
+    for i, tc in enumerate(raw_calls):
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        name = fn.get("name") or tc.get("name")
+        args = fn.get("arguments") if fn.get("arguments") is not None else tc.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args or "{}")
+            except ValueError:
+                args = {}
+        if name:
+            out.append({"id": tc.get("id") or "call_%d" % i, "name": name, "input": args or {}})
+    if out:
+        return out
+
+    # Last resort: some providers stuff a JSON tool-call blob into content as text.
+    stripped = (text or "").strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            blob = json.loads(stripped)
+        except ValueError:
+            return out
+        candidates = blob.get("tool_calls") if isinstance(blob, dict) else None
+        if not candidates and isinstance(blob, dict) and blob.get("name"):
+            candidates = [blob]
+        for i, tc in enumerate(candidates or []):
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            name = fn.get("name") or tc.get("name")
+            args = fn.get("arguments") if fn.get("arguments") is not None else tc.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args or "{}")
+                except ValueError:
+                    args = {}
+            if name:
+                out.append({"id": tc.get("id") or "call_%d" % i, "name": name, "input": args or {}})
+    return out
 
 
 def add_tool_results(messages, results):
