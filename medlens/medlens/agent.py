@@ -74,12 +74,12 @@ def run_review(cfg, input_path, out_path, max_steps=8):
         feedback.error("the model returned no tool calls, so nothing was extracted.")
         if last_text:
             feedback.note("model said: %s" % last_text[:300])
-        feedback.note("Either this model/provider didn't emit a parseable tool call (the raw "
-                      "assistant message was logged at ERROR above), or its endpoint doesn't "
-                      "support tool calling. The model is your choice — known-good free "
-                      "OpenRouter options that advertise tool support include "
-                      "meta-llama/llama-3.3-70b-instruct:free, qwen/qwen3-coder:free, and "
-                      "openai/gpt-oss-120b:free. Run with -v for full traces.")
+        feedback.note("Common causes (see the raw assistant message in the ERROR log above):")
+        feedback.note("  1) Reasoning model — its <think> trace ate the token budget before the "
+                      "structured tool_call was emitted. Try: --no-reasoning  (or --max-tokens 16384).")
+        feedback.note("  2) Endpoint genuinely doesn't support tool calling. Pick another model — "
+                      "your choice — e.g. meta-llama/llama-3.3-70b-instruct:free, "
+                      "qwen/qwen3-coder:free, openai/gpt-oss-120b:free.")
     else:
         feedback.error("no report produced.")
     return None

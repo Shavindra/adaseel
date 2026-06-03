@@ -63,11 +63,17 @@ def chat(cfg, messages, tools=None):
         return _fake(messages, tools)
 
     url = cfg["base_url"].rstrip("/") + "/chat/completions"
-    # Give reasoning models (e.g. nemotron-nano, gpt-oss, etc.) room to actually
-    # finish reasoning AND emit the tool call — without max_tokens many upstream
-    # defaults cut them off mid-thought, leaving content="" and no tool_calls.
     body = {"model": cfg["model"], "messages": messages, "temperature": 0.2,
-            "max_tokens": cfg.get("max_tokens", 4096)}
+            "max_tokens": cfg.get("max_tokens", 8192)}
+    # Reasoning models (nemotron-nano, gpt-oss, deepseek-r1, etc.) emit a long
+    # <think>...</think> trace BEFORE the tool call, and on tight budgets the
+    # closing tag itself gets cut off — leaving content="", tool_calls=[], even
+    # when the model intended to call a tool. OpenRouter's `reasoning.exclude`
+    # tells the gateway to suppress the trace so the structured tool_call arrives.
+    if cfg.get("no_reasoning"):
+        body["reasoning"] = {"exclude": True}
+    elif cfg.get("reasoning_effort"):
+        body["reasoning"] = {"effort": cfg["reasoning_effort"]}
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
@@ -120,22 +126,32 @@ def chat(cfg, messages, tools=None):
     reasoning = msg.get("reasoning") or msg.get("reasoning_content") or ""
     tool_calls = _parse_tool_calls(msg, text)
 
-    if not tool_calls and finish == "tool_calls":
+    # Specific diagnosis for the live failure pattern we hit: reasoning model
+    # spent its budget inside <think>…</think>, the closing tag itself got cut
+    # off, no structured tool_calls ever arrived. Detect by reasoning-tail
+    # truncation (mid-tag like `</think`) or sheer length.
+    looks_truncated_reasoning = (
+        reasoning and not tool_calls and not text and (
+            reasoning.rstrip().endswith("</think") or
+            (not reasoning.rstrip().endswith("</think>")
+             and finish in ("length", "stop", "tool_calls"))
+        )
+    )
+    if looks_truncated_reasoning:
+        log.error(
+            "REASONING MODEL TRUNCATED: %d chars of `reasoning`, content='', "
+            "tool_calls=[], finish_reason=%s. The <think>…</think> trace was cut "
+            "off before the model could emit the tool call. Fix: either pass "
+            "--no-reasoning (sends reasoning.exclude to OpenRouter so the trace is "
+            "suppressed), bump --max-tokens (currently %s), or pick a non-reasoning "
+            "model. Last reasoning chars: %r",
+            len(reasoning), finish, body.get("max_tokens"), reasoning[-300:])
+    elif not tool_calls and finish == "tool_calls":
         log.error("finish_reason='tool_calls' but no tool calls parsed; raw:\n%s",
                   json.dumps(msg)[:2000])
     elif not tool_calls and not text:
-        # The specific case we hit live: a reasoning model burnt its budget
-        # in `reasoning` and got cut off (finish_reason=length) before emitting
-        # the tool call. Call this out explicitly — it's the actionable diagnosis.
-        if reasoning and finish in ("length", "stop"):
-            log.error("model emitted only `reasoning` (%d chars) with no content/tool_calls and "
-                      "finish_reason=%s — looks like a reasoning model that ran out of tokens "
-                      "before emitting the tool call. Increase --max-tokens (currently %s), or "
-                      "pick a non-reasoning model. Last reasoning chars: %r",
-                      len(reasoning), finish, body.get("max_tokens"), reasoning[-300:])
-        else:
-            log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
-                        finish, json.dumps(msg)[:1000])
+        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
+                    finish, json.dumps(msg)[:1000])
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 

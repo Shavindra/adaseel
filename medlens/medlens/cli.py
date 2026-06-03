@@ -43,9 +43,11 @@ def _setup_logging(verbose, log_file=None):
         logger.addHandler(fh)
 
 
-def _cfg(base_url, model, api_key, fake=False, max_tokens=4096):
-    return {"base_url": base_url, "model": model, "api_key": api_key,
-            "fake": fake, "max_tokens": max_tokens}
+def _cfg(base_url, model, api_key, fake=False, max_tokens=8192,
+         no_reasoning=False, reasoning_effort=None):
+    return {"base_url": base_url, "model": model, "api_key": api_key, "fake": fake,
+            "max_tokens": max_tokens, "no_reasoning": no_reasoning,
+            "reasoning_effort": reasoning_effort}
 
 
 def _ensure_sample():
@@ -62,8 +64,14 @@ def review(
     api_key: str = typer.Option(DEFAULT_API_KEY, "--api-key", help="API key (ignored by Ollama)"),
     out: Optional[str] = typer.Option(None, "--out", help="report path (default lab_report_review.md)"),
     max_steps: int = typer.Option(8, "--max-steps", help="max agent turns"),
-    max_tokens: int = typer.Option(4096, "--max-tokens",
-                                   help="per-turn token budget — bump for reasoning models"),
+    max_tokens: int = typer.Option(8192, "--max-tokens",
+                                   help="per-turn token budget (bump for reasoning models)"),
+    no_reasoning: bool = typer.Option(False, "--no-reasoning",
+                                      help="OpenRouter: suppress the <think>…</think> reasoning "
+                                           "trace so the structured tool_call actually arrives"),
+    reasoning_effort: Optional[str] = typer.Option(None, "--reasoning-effort",
+                                                   help="OpenRouter: 'low'|'medium'|'high' "
+                                                        "(alternative to --no-reasoning)"),
     quiet: bool = typer.Option(False, "--quiet"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="show debug logs"),
     log_file: Optional[str] = typer.Option(None, "--log-file"),
@@ -73,7 +81,8 @@ def review(
     _setup_logging(verbose, log_file)
     input_path = input or _ensure_sample()
     out_path = out or labtools.DEFAULT_OUT
-    run_review(_cfg(base_url, model, api_key, max_tokens=max_tokens),
+    run_review(_cfg(base_url, model, api_key, max_tokens=max_tokens,
+                    no_reasoning=no_reasoning, reasoning_effort=reasoning_effort),
                input_path, out_path, max_steps=max_steps)
 
 
