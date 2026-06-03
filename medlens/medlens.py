@@ -25,9 +25,11 @@ framework, no classes, no async — just functions run in order):
 and it writes a Markdown report (lab_report_review.md) that leads with the
 disclaimer and is structured so the human-in-the-loop framing is obvious.
 
-Install:  pip install docling surya-ocr openai requests pillow
-          (Docling + Surya run locally; the LLM is any OpenAI-compatible endpoint,
-           e.g. a local MedGemma/Meditron via Ollama, or a free hosted API.)
+Install:  pip install docling surya-ocr requests pillow
+          (Docling + Surya run locally. The reasoning stage is vendor-agnostic: it
+           talks to any OpenAI-compatible /chat/completions endpoint over plain
+           HTTP — no vendor SDK — e.g. a local MedGemma/Meditron via Ollama, or a
+           hosted gateway like Groq/Gemini, by swapping --base-url/--model.)
 
 Run:      python medlens.py                 # generate sample + run the full pipeline
           python medlens.py --input scan.png # run on your own (synthetic!) scan
@@ -447,12 +449,13 @@ def _build_reason_prompt(abnormal, normals):
 
 
 def reason_about(abnormal, normals, base_url, model, api_key):
-    """Call the configurable OpenAI-compatible model. Returns (text, used_model).
+    """Call the configurable model over plain HTTP. Returns (text, used_model).
 
-    OpenAI-compatible means it works with a local Ollama (/v1), or hosted Groq/
-    Gemini/OpenAI endpoints, by swapping --base-url/--model. On any error we
-    return a clearly-labelled placeholder and used_model=False — we never make up
-    medical content to fill the gap."""
+    Vendor-agnostic: this speaks the OpenAI-compatible /chat/completions wire
+    format with `requests` (no vendor SDK), so it works with a local Ollama (/v1)
+    or any hosted gateway (Groq/Gemini/…) just by swapping --base-url/--model. On
+    any error we return a clearly-labelled placeholder and used_model=False — we
+    never make up medical content to fill the gap."""
     messages = [{"role": "system", "content": REASON_SYSTEM},
                 {"role": "user", "content": _build_reason_prompt(abnormal, normals)}]
     url = base_url.rstrip("/") + "/chat/completions"

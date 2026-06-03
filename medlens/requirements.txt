@@ -10,7 +10,6 @@ pillow>=9.0          # renders the synthetic sample image
 docling>=2.0
 surya-ocr>=0.6
 
-# Reasoning stage (Stage 3) talks to any OpenAI-compatible endpoint over plain
-# HTTP via `requests`, so the OpenAI SDK is optional. Install it only if you
-# prefer to swap the client implementation.
-# openai>=1.0
+# Reasoning stage (Stage 3) is vendor-agnostic: it calls any OpenAI-compatible
+# /chat/completions endpoint over plain HTTP via `requests` above. No vendor SDK
+# (openai/anthropic/etc.) is needed — point --base-url at Ollama, Groq, Gemini, …
