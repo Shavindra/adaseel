@@ -25,7 +25,10 @@ def run_tool_loop(provider, model, system, user_msg, org, ctx, max_steps=14):
 
     for step in range(1, max_steps + 1):
         with feedback.working("agent %s deciding next step" % provider):
-            s = providers.llm_step(provider, model, system, messages, TOOL_SCHEMAS)
+            # Generous token budget so reasoning models have room to finish
+            # reasoning AND emit a tool call in the same turn.
+            s = providers.llm_step(provider, model, system, messages, TOOL_SCHEMAS,
+                                   max_tokens=8192)
         if s.get("error"):
             feedback.error(s["error"])
             return collected, s["error"]

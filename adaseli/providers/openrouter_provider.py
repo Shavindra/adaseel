@@ -129,13 +129,22 @@ def openrouter_step(model, system, messages, tools, max_tokens):
     msg["content"] = text
     msg.setdefault("role", "assistant")
     finish = choices[0].get("finish_reason")
+    # Reasoning models put chain-of-thought in a `reasoning` field separate from `content`.
+    reasoning = msg.get("reasoning") or msg.get("reasoning_content") or ""
     tool_calls = _parse_tool_calls(msg, text)
     if not tool_calls and finish == "tool_calls":
-        log.error("finish_reason='tool_calls' but no tool calls parsed; raw message:\n%s",
+        log.error("finish_reason='tool_calls' but no tool calls parsed; raw:\n%s",
                   json.dumps(msg)[:2000])
     elif not tool_calls and not text:
-        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
-                    finish, json.dumps(msg)[:1000])
+        if reasoning and finish in ("length", "stop"):
+            log.error("model emitted only `reasoning` (%d chars) with no content/tool_calls and "
+                      "finish_reason=%s — likely a reasoning model that ran out of tokens before "
+                      "emitting the tool call. Increase max_tokens (currently %s) or pick a "
+                      "non-reasoning model. Last reasoning chars: %r",
+                      len(reasoning), finish, max_tokens, reasoning[-300:])
+        else:
+            log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
+                        finish, json.dumps(msg)[:1000])
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 
