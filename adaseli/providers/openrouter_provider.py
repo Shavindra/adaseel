@@ -68,6 +68,7 @@ def openrouter_step(model, system, messages, tools, max_tokens):
     choices = data.get("choices") or [{}]
     msg = choices[0].get("message", {}) or {}
     text = msg.get("content") or ""
+    msg["content"] = text  # normalise null→"" so re-sent assistant messages are valid
     tool_calls = []
     for tc in msg.get("tool_calls", []) or []:
         fn = tc.get("function", {})

@@ -30,7 +30,7 @@ def search_string(gene, species, limit=15):
     # Enrichment over {gene + its partners}: tells us what the neighbourhood does.
     names = [gene] + [p["partner"] for p in out["partners"] if p.get("partner")]
     enr = http.http_get("%s/enrichment" % api,
-                        params={"identifiers": "%0d".join(names), "species": species,
+                        params={"identifiers": "\r".join(names), "species": species,
                                 "caller_identity": "adaseli"})
     out["enrichment"] = []
     if http.is_err(enr):
