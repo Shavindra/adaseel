@@ -57,16 +57,25 @@ models on first use).
 ## Run
 
 ```bash
-# Default backend is OpenRouter; YOU pick the model with --model / MEDLENS_MODEL
-export OPENROUTER_API_KEY=sk-or-v1-...
-python -m medlens review                       # default: nvidia/nemotron-nano-9b-v2:free
-python -m medlens review --model <your-chosen-model>
+# Run with NO flags on a terminal and MEDLENS prompts you for the gateway
+# (OpenRouter / Groq) and then the model (Qwen / Nemotron / paste an id):
+export OPENROUTER_API_KEY=sk-or-v1-...           # OpenRouter key, OR…
+export GROQ_API_KEY=gsk_...                      # …a Groq key
+python -m medlens review                         # → interactive provider/model prompt
 
-# Optional: list models so YOU can choose one whose endpoint supports tool calling
-python -m medlens models --free --tools
+# Or pin it non-interactively. --provider sets the base-url + key env; --model
+# accepts the shorthands 'qwen'/'nemotron' or any full id:
+python -m medlens review --provider openrouter --model nemotron
+python -m medlens review --provider openrouter --model qwen
+python -m medlens review --provider groq       --model qwen   # Groq has no Nemotron
+python -m medlens review --no-pick               # skip the prompt, use defaults
+
+# Optional: list a provider's models so YOU can pick one that supports tool calling
+python -m medlens models --provider groq --tools
+python -m medlens models --provider openrouter --free --tools
 
 # Check the endpoint is reachable
-python -m medlens check
+python -m medlens check --provider groq
 
 # Fully local via Ollama (pick a tool-calling model)
 python -m medlens review --base-url http://localhost:11434/v1 --model qwen2.5
@@ -108,9 +117,11 @@ medlens/
 
 | Flag / env | Purpose | Default |
 | --- | --- | --- |
-| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint | `https://openrouter.ai/api/v1` |
-| `--model` / `MEDLENS_MODEL` | reasoning model id you choose (needs tool calling) | `nvidia/nemotron-nano-9b-v2:free` |
-| `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` |
+| `--provider` | `openrouter` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
+| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint (overrides `--provider`) | `https://openrouter.ai/api/v1` |
+| `--model` / `MEDLENS_MODEL` | model id, or shorthand `qwen` / `nemotron` (needs tool calling) | `nvidia/nemotron-nano-9b-v2:free` |
+| `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` |
+| `--no-pick` | skip the interactive provider/model prompt | off |
 | `--input` | path to a synthetic scan | the bundled sample |
 | `--out` | report output path | `lab_report_review.md` |
 

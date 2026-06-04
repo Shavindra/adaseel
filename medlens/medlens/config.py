@@ -25,6 +25,77 @@ DEFAULT_API_KEY = (os.environ.get("MEDLENS_API_KEY")
                    or os.environ.get("OPENROUTER_API_KEY")
                    or os.environ.get("OPENAI_API_KEY") or "")
 
+# ---------------------------------------------------------------------------
+# Provider presets (POC convenience). Each is just an OpenAI-compatible gateway:
+# same /chat/completions wire format, only the base_url + which env var holds the
+# key differs. `--provider` selects one; the model shorthands ('qwen'/'nemotron')
+# resolve against the chosen provider's `models` map. You can always bypass all of
+# this with an explicit --base-url + --model + --api-key.
+#
+# NOTE on model ids: these are best-known defaults for a POC and DO drift over time.
+# If a run 404s on the model, list the live catalogue and pick one:
+#     python -m medlens models --provider groq --tools
+#     python -m medlens models --provider openrouter --free --tools
+# Groq does NOT host NVIDIA Nemotron — only OpenRouter does here.
+PROVIDERS = {
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "key_envs": ["OPENROUTER_API_KEY", "MEDLENS_API_KEY", "OPENAI_API_KEY"],
+        "models": {
+            "nemotron": "nvidia/nemotron-nano-9b-v2:free",
+            "qwen": "qwen/qwen3-30b-a3b:free",
+        },
+        "default_model": "nvidia/nemotron-nano-9b-v2:free",
+    },
+    "groq": {
+        "label": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_envs": ["GROQ_API_KEY", "MEDLENS_API_KEY"],
+        "models": {
+            # Groq has no Nemotron; Qwen3-32B is its tool-calling Qwen.
+            "qwen": "qwen/qwen3-32b",
+        },
+        "default_model": "qwen/qwen3-32b",
+    },
+}
+
+
+def resolve_api_key(provider, explicit=None):
+    """Pick the API key: an explicit value wins, else the first set env var for the
+    provider, else a generic fallback. Returns "" if none found (Ollama needs none)."""
+    if explicit:
+        return explicit
+    envs = PROVIDERS.get((provider or "").lower(), {}).get("key_envs", [])
+    for e in envs + ["MEDLENS_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"]:
+        if os.environ.get(e):
+            return os.environ[e]
+    return ""
+
+
+def resolve_model(provider, model):
+    """Map a shorthand ('qwen'/'nemotron') to the provider's concrete id; pass any
+    other value through unchanged (so a full model id always works)."""
+    presets = PROVIDERS.get((provider or "").lower(), {}).get("models", {})
+    return presets.get(model, model)
+
+
+def resolve_endpoint(provider=None, base_url=None, model=None, api_key=None):
+    """Resolve (provider, base_url, model_id, api_key) from any mix of inputs.
+    An explicit --base-url always wins; --provider supplies a preset base_url + key
+    source + model shorthands; otherwise we default to OpenRouter."""
+    prov = (provider or "").lower() or None
+    if base_url:
+        base = base_url.rstrip("/")
+    elif prov and prov in PROVIDERS:
+        base = PROVIDERS[prov]["base_url"]
+    else:
+        prov = prov or "openrouter"
+        base = PROVIDERS["openrouter"]["base_url"]
+    default_model = PROVIDERS.get(prov, {}).get("default_model", DEFAULT_MODEL)
+    mid = resolve_model(prov, model or default_model)
+    return prov, base, mid, resolve_api_key(prov, api_key)
+
 # The agent's system prompt: it tells the model which tools exist, the workflow,
 # and the hard safety rules. The model DRIVES — it chooses to call the tools — but
 # the prompt forbids it from doing the deterministic flagging itself.
