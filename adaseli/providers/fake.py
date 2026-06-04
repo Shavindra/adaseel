@@ -28,15 +28,26 @@ def make_fake_provider():
     state = {"i": 0}
 
     def provider(messages, tools):
-        # Tool-free turns (tools=None) are the analysis and report agents. Peek at
-        # the last user message to emit role-appropriate offline text.
+        # A fresh tool-calling loop always starts with a single user message; reset the
+        # script so the reviewer's INDEPENDENT search replays the same canned sequence
+        # (otherwise the second run would start past the end of the script).
+        if tools is not None and len(messages) == 1:
+            state["i"] = 0
+        # Tool-free turns (tools=None) are the analysis, report, and review agents.
+        # Peek at the last user message to emit role-appropriate offline text.
         if tools is None:
             last = ""
             for m in reversed(messages):
                 if m.get("role") == "user":
                     last = m.get("content") or ""
                     break
-            if "RAW evidence" in last or "structured analysis" in last:
+            if "falsifiability" in last or "under audit" in last:
+                txt = ("# selftest critical review\n\n## Verdict\n(generated offline without "
+                       "a model) Reproducibility + critique wiring verified end to end.\n\n"
+                       "## Reproducibility (independent re-run vs original)\nIndependent re-run "
+                       "executed; see the machine coverage diff.\n\n## Loopholes & threats to "
+                       "validity\n- Offline self-test: no live evidence to audit.")
+            elif "RAW evidence" in last or "structured analysis" in last:
                 txt = ("Identity: (offline) | Annotation: see coverage | Structure: n/a | "
                        "Network: n/a | Literature: none | Gaps: search ran offline.")
             else:

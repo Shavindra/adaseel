@@ -87,6 +87,14 @@ def research(
     report_model: Optional[str] = typer.Option(
         None, "--report-model",
         help="optional stronger model for the report agent (e.g. a larger model)"),
+    review: bool = typer.Option(
+        True, "--review/--no-review",
+        help="run the 4th agent: independently re-run the pipeline and write a "
+             "falsifiability critique to {gene}_report_review.md (≈ doubles calls). "
+             "Use --no-review to skip it."),
+    review_model: Optional[str] = typer.Option(
+        None, "--review-model",
+        help="optional model for the reviewer's critique (defaults to --report-model/--model)"),
     max_steps: int = typer.Option(14, "--max-steps", help="max search-agent tool turns"),
     out: Optional[str] = typer.Option(None, "--out", help="output path (default {gene}_report.md)"),
     quiet: bool = typer.Option(False, "--quiet", help="suppress progress feedback"),
@@ -95,14 +103,19 @@ def research(
     organism_name: str = _NAME, taxon: str = _TAXON,
     string_species: str = _STRING, kegg_org: str = _KEGG,
 ):
-    """Run search → analysis → report on GENE and save a Markdown report."""
+    """Run search → analysis → report on GENE and save a Markdown report.
+
+    With --review (default), a 4th agent independently re-runs the whole pipeline and
+    writes a separate falsifiability critique alongside the report.
+    """
     feedback.configure(quiet=quiet)
     setup_logging(verbose=verbose, log_file=log_file)
     model = model or DEFAULT_MODELS[provider.value]
     _require_key(provider)
     org = _org(organism_name, taxon, string_species, kegg_org)
     run_pipeline(gene, org, provider.value, model, question=question,
-                 report_model=report_model, out_path=out, max_steps=max_steps)
+                 report_model=report_model, out_path=out, max_steps=max_steps,
+                 review=review, review_model=review_model)
 
 
 # --- check -----------------------------------------------------------------
@@ -180,6 +193,8 @@ def selftest(
     gene: str = typer.Argument("slr1634", help="gene to use for the offline run"),
     question: Optional[str] = typer.Option(None, "--question", "-q"),
     out: Optional[str] = typer.Option(None, "--out"),
+    review: bool = typer.Option(True, "--review/--no-review",
+                                help="also exercise the 4th (review) agent offline"),
     quiet: bool = typer.Option(False, "--quiet", help="suppress progress feedback"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="show detailed debug logs"),
     log_file: Optional[str] = typer.Option(None, "--log-file", help="also write full debug logs to this file"),
@@ -191,7 +206,8 @@ def selftest(
     providers.set_fake_provider(make_fake_provider())
     org = _org(DEFAULT_ORG["name"], DEFAULT_ORG["taxon"],
                DEFAULT_ORG["string_species"], DEFAULT_ORG["kegg_org"])
-    run_pipeline(gene, org, "fake", "(none)", question=question, out_path=out, max_steps=8)
+    run_pipeline(gene, org, "fake", "(none)", question=question, out_path=out,
+                 max_steps=8, review=review)
 
 
 # --- helpers ---------------------------------------------------------------

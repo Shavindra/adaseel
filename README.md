@@ -5,11 +5,18 @@ public biological databases, keeps digging until it has tried every relevant
 source, then synthesises and writes a structured Markdown report of *what is
 already known* — and answers a question you pose about the gene.
 
-It runs as **three cooperating agents**:
+It runs as **three cooperating agents**, with an optional **fourth** that audits them:
 
 1. **Search** — exhaustive retrieval: drives the tools until every source is tried.
 2. **Analysis** — reads the raw evidence and synthesises structured findings.
 3. **Report** — writes the report, a discussion, and a direct answer to your question.
+4. **Review** *(optional, on by default)* — an independent, skeptical critic. It
+   **re-runs the whole search→analysis→report pipeline itself**, then audits the
+   original report with **falsifiability checks**: for each claim it asks what would
+   prove it wrong, whether the evidence actually rules that out, where the inference is
+   weakest, and why the report might be wrong. It writes a **separate**
+   `{gene}_report_review.md` — the original report is never touched. Disable with
+   `--no-review` (it roughly doubles model + API calls).
 
 The LLM backend is **pluggable** (Anthropic, Ollama, OpenRouter), so you are not
 locked to any one provider. Progress is streamed with `rich`, and the CLI is built
@@ -36,7 +43,7 @@ adaseli/
     openrouter_provider.py  OpenRouter (OpenAI-compatible; free Nemotron etc.)
     fake.py                 offline provider used by `selftest`
   agents/              the pipeline
-    search.py · analysis.py · report.py · orchestrator.py · loop.py
+    search.py · analysis.py · report.py · review.py · orchestrator.py · loop.py
 ```
 
 ## What it looks at
@@ -93,6 +100,12 @@ python -m adaseli research slr1634 --provider anthropic   # claude-haiku-4-5-202
 python -m adaseli research slr1634 \
     --model nvidia/nemotron-nano-9b-v2:free \
     --report-model nvidia/llama-3.1-nemotron-ultra-253b-v1:free
+
+# The 4th reviewer agent is ON by default: writes {gene}_report_review.md alongside
+# the report (an independent re-run + falsifiability critique). It ~doubles calls —
+# turn it off, or give the critic its own (stronger) model:
+python -m adaseli research slr1634 --no-review
+python -m adaseli research slr1634 --review-model nvidia/llama-3.1-nemotron-ultra-253b-v1:free
 
 # Any organism: override the ids (NCBI taxon / STRING species / KEGG code)
 python -m adaseli research TP53 --organism-name "Homo sapiens" \

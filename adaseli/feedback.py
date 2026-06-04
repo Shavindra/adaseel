@@ -88,6 +88,20 @@ def stage(n, total, title, subtitle=""):
         print("-" * 72)
 
 
+def section(title, subtitle=""):
+    """A heavier, top-level banner separating major phases (e.g. the original
+    pipeline vs the independent review re-run)."""
+    if _QUIET:
+        return
+    label = title if not subtitle else "%s — %s" % (title, subtitle)
+    if _console is not None:
+        _console.print(Rule("[bold magenta]%s[/bold magenta]" % label, style="magenta"))
+    else:
+        print("\n" + "=" * 72)
+        print("== " + label)
+        print("=" * 72)
+
+
 def tool_call(name, args):
     """Show that a tool is being invoked."""
     detail = json.dumps(args)[:120] if args else ""
