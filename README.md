@@ -1,4 +1,4 @@
-# adaseli
+# adaseel
 
 An exhaustive **gene research pipeline**. Give it a gene and it queries many free
 public biological databases, keeps digging until it has tried every relevant
