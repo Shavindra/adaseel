@@ -11,13 +11,35 @@ order or write medical considerations. Provider/model configuration is still use
 for testing endpoint resolution now and for the bounded research roles planned in
 `docs/MULTI_AGENT_RESEARCH_RUNBOOK.md`.
 
-## OpenRouter
+## One-time local configuration
 
-Set an OpenRouter key once:
+Copy the example environment file once and edit it with your provider/model choices
+and local API keys:
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-v1-...
+cp medlens/.env.example .env
+$EDITOR .env
 ```
+
+MEDLENS automatically loads `.env` from the repo root, from `medlens/.env`, or from
+the current working directory. Real `.env` files are gitignored, so you do not need
+to export `OPENROUTER_API_KEY` every time you run a script.
+
+Defaults are OpenRouter + Nemotron:
+
+```text
+MEDLENS_PROVIDER=openrouter
+MEDLENS_BASE_URL=https://openrouter.ai/api/v1
+MEDLENS_MODEL=nvidia/nemotron-nano-9b-v2:free
+```
+
+With that `.env`, this uses OpenRouter Nemotron by default:
+
+```bash
+python -m medlens review --no-pick
+```
+
+## OpenRouter
 
 Run Qwen via the configured shorthand:
 

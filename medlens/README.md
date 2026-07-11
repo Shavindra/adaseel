@@ -59,9 +59,18 @@ models on first use).
 
 ## Run
 
+Create a local config once so scripts and repeated runs do not need exported keys:
+
 ```bash
-# OpenRouter hosted examples. Set a key once, then use the qwen/nemotron shorthands.
-export OPENROUTER_API_KEY=sk-or-v1-...
+cp medlens/.env.example .env
+# edit .env and set OPENROUTER_API_KEY, MEDLENS_PROVIDER, MEDLENS_MODEL, etc.
+```
+
+With no provider/model flags, `python -m medlens review --no-pick` defaults to
+OpenRouter Nemotron (`nvidia/nemotron-nano-9b-v2:free`).
+
+```bash
+# OpenRouter hosted examples. Use .env or set OPENROUTER_API_KEY in your shell.
 python -m medlens review --provider openrouter --model qwen --no-pick
 python -m medlens review --provider openrouter --model nemotron --no-reasoning --no-pick
 
@@ -122,13 +131,17 @@ medlens/
 
 | Flag / env | Purpose | Default |
 | --- | --- | --- |
-| `--provider` | `openrouter` \| `ollama` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
-| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint (overrides `--provider`) | `https://openrouter.ai/api/v1` |
+| `--provider` / `MEDLENS_PROVIDER` | `openrouter` \| `ollama` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
+| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint (overrides provider base URL) | `https://openrouter.ai/api/v1` |
 | `--model` / `MEDLENS_MODEL` | model id, or shorthand `qwen` / `nemotron` for providers that define those presets | `nvidia/nemotron-nano-9b-v2:free` |
-| `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` |
+| `--api-key` / `MEDLENS_API_KEY` | API key; may be stored in local `.env` for repeated runs | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` |
 | `--no-pick` | skip the interactive provider/model prompt | off |
 | `--input` | path to a synthetic scan | the bundled sample |
 | `--out` | report output path | `lab_report_review.md` |
+
+MEDLENS automatically loads local `.env` files from the repo root, `medlens/.env`,
+or the current working directory. Copy `medlens/.env.example` to `.env` for repeated
+provider/model testing without re-exporting API keys.
 
 ## Limitations
 

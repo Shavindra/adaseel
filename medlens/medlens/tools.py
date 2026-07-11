@@ -7,11 +7,12 @@ is cached in a shared `ctx`, NOT round-tripped through the model. So:
   * extract_lab_report  caches the parsed rows in ctx
   * flag_results        flags the CACHED rows deterministically (the model cannot
                         pass in its own values or ranges)
-  * save_report         builds the report from the CACHED rows + flags; the model
-                        only contributes its bounded `considerations` text
+  * save_report         is private/deterministic and builds the report only after
+                        deterministic flagging has completed
 
-This is what keeps a medical-ish prototype honest: the agent orchestrates, but it
-cannot tamper with the numbers or the high/low arithmetic.
+This is what keeps a medical-ish prototype honest: deterministic Python controls
+the critical workflow and the model cannot tamper with the numbers or the high/low
+arithmetic.
 """
 
 import os
@@ -106,14 +107,11 @@ def save_report(ctx, cfg):
         considerations_text = "\n".join(str(item) for item in considerations if str(item).strip())
     else:
         considerations_text = str(considerations)
-    if not considerations_text.strip():
-        limitations = ctx.get("limitations") or []
-        if limitations:
-            considerations_text = "\n".join("- %s" % item for item in limitations)
     report = labtools.build_report(
         ctx["rows"], ctx.get("abnormal", []), considerations_text,
         source=ctx.get("input_path"), engine=ctx.get("engine", "unknown"),
-        model_label=cfg.get("model", "unknown"))
+        model_label=cfg.get("model", "unknown"),
+        limitations=ctx.get("limitations") or [])
     out_path = ctx.get("out_path") or labtools.DEFAULT_OUT
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(report)

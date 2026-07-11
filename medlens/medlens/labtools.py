@@ -304,12 +304,12 @@ def _results_table_md(rows):
     return "\n".join(out)
 
 
-def build_report(rows, abnormal, considerations, source, engine, model_label):
-    """Assemble the final Markdown. The tables/flags come from the deterministic
-    data (not the model); only `considerations` is the agent's bounded text."""
+def build_report(rows, abnormal, considerations, source, engine, model_label, limitations=None):
+    """Assemble the final Markdown from deterministic rows, flags, and metadata."""
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     unparsed = [r["test_name"] for r in rows if r.get("flag") == "unparsed"]
     no_range = [r["test_name"] for r in rows if str(r.get("flag", "")).startswith("cannot_assess")]
+    extra_limitations = [str(item).strip() for item in (limitations or []) if str(item).strip()]
 
     md = ["> **%s**" % DISCLAIMER, "",
           "# Lab report review (DRAFT — for clinician verification)", "",
@@ -335,12 +335,14 @@ def build_report(rows, abnormal, considerations, source, engine, model_label):
            "> The following is an **unverified, AI-generated draft** of *possibilities to "
            "discuss with a clinician* — not a diagnosis, not exhaustive, and possibly wrong. "
            "A qualified clinician must verify or discard each point.", "",
-           considerations.strip() if considerations and considerations.strip() else "_No considerations produced._",
+           considerations.strip() if considerations and considerations.strip() else "_No evidence-backed considerations produced._",
            "", "## 4. Limitations & coverage",
            "- **Could not be parsed (value unreadable):** %s" % (", ".join(unparsed) if unparsed else "none"),
            "- **No reference range on report (not assessed):** %s" % (", ".join(no_range) if no_range else "none"),
-           "- Reference ranges were used **as printed**; none were guessed or substituted.",
-           "- The considerations are **AI-generated and unverified**. Educational prototype, not a "
-           "medical device, and may be wrong.", "",
+           "- Reference ranges were used **as printed**; none were guessed or substituted."]
+    for limitation in extra_limitations:
+        md.append("- %s" % limitation)
+    md += ["- The considerations section is empty unless evidence-backed research agents "
+           "produce validated claims. Educational prototype, not a medical device, and may be wrong.", "",
            "---", "_%s_" % DISCLAIMER]
     return "\n".join(md) + "\n"

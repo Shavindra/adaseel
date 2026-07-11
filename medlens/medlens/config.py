@@ -4,6 +4,49 @@ agent's system prompt (which encodes the workflow + the safety guardrails)."""
 
 import os
 
+
+def _load_env_file(path):
+    """Load simple KEY=VALUE lines from a local .env file without a dependency.
+
+    Existing process environment variables win, so shell/CI secrets cannot be
+    accidentally overwritten by a checked-out file. This intentionally supports only
+    the common dotenv subset needed for MEDLENS provider/model configuration.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def load_dotenv():
+    """Load .env from the repo root, medlens project dir, and current directory."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(here)
+    repo_dir = os.path.dirname(project_dir)
+    seen = set()
+    for directory in (repo_dir, project_dir, os.getcwd()):
+        path = os.path.join(directory, ".env")
+        if path not in seen:
+            seen.add(path)
+            _load_env_file(path)
+
+
+load_dotenv()
+
 # Printed at the top (and bottom) of every report and at the start of every run.
 # Verbatim and non-negotiable — this keeps the prototype honestly scoped.
 DISCLAIMER = (
@@ -16,6 +59,7 @@ DISCLAIMER = (
 # base_url/model: a local Ollama (http://localhost:11434/v1) for fully-local
 # checks, or any hosted gateway (Groq/Gemini/…). The api_key is required by
 # hosted APIs, ignored by Ollama.
+DEFAULT_PROVIDER = os.environ.get("MEDLENS_PROVIDER", "openrouter")
 DEFAULT_BASE_URL = os.environ.get("MEDLENS_BASE_URL", "https://openrouter.ai/api/v1")
 # YOU choose the model — set it here or via --model / MEDLENS_MODEL. The code never
 # picks or switches models for you. Note the agent needs a model whose endpoint
@@ -99,15 +143,18 @@ def resolve_endpoint(provider=None, base_url=None, model=None, api_key=None):
     """Resolve (provider, base_url, model_id, api_key) from any mix of inputs.
     An explicit --base-url always wins; --provider supplies a preset base_url + key
     source + model shorthands; otherwise we default to OpenRouter."""
-    prov = (provider or "").lower() or None
+    prov = (provider or os.environ.get("MEDLENS_PROVIDER") or "").lower() or None
     if base_url:
         base = base_url.rstrip("/")
     elif prov and prov in PROVIDERS:
         base = PROVIDERS[prov]["base_url"]
     else:
-        prov = prov or "openrouter"
-        base = PROVIDERS["openrouter"]["base_url"]
-    default_model = PROVIDERS.get(prov, {}).get("default_model", DEFAULT_MODEL)
+        prov = prov or DEFAULT_PROVIDER
+        if prov not in PROVIDERS:
+            prov = "openrouter"
+        base = PROVIDERS[prov]["base_url"]
+    env_model = os.environ.get("MEDLENS_MODEL")
+    default_model = env_model or PROVIDERS.get(prov, {}).get("default_model", DEFAULT_MODEL)
     mid = resolve_model(prov, model or default_model)
     return prov, base, mid, resolve_api_key(prov, api_key)
 
