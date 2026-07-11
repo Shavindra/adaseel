@@ -36,16 +36,6 @@ TOOL_SCHEMAS = [
                        "EVERY abnormality judgement. Takes no arguments — it flags the extracted "
                        "results.",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
-    {"type": "function", "function": {
-        "name": "save_report",
-        "description": "Write the final Markdown report. Pass your bounded 'considerations' "
-                       "(possibilities for clinician review, with explicit uncertainty). The "
-                       "extracted table and deterministic flags are added automatically.",
-        "parameters": {"type": "object",
-                       "properties": {"considerations": {
-                           "type": "string",
-                           "description": "your bounded, non-diagnostic considerations in Markdown"}},
-                       "required": ["considerations"]}}},
 ]
 
 TOOL_NAMES = [t["function"]["name"] for t in TOOL_SCHEMAS]
@@ -81,20 +71,6 @@ def run_tool(name, args, ctx, cfg):
                 "n_abnormal": len(abnormal),
             }
 
-        if name == "save_report":
-            if not ctx.get("rows"):
-                return {"error": "nothing extracted/flagged to report yet"}
-            considerations = args.get("considerations", "")
-            report = labtools.build_report(
-                ctx["rows"], ctx.get("abnormal", []), considerations,
-                source=ctx.get("input_path"), engine=ctx.get("engine", "unknown"),
-                model_label=cfg.get("model", "unknown"))
-            out_path = ctx.get("out_path") or labtools.DEFAULT_OUT
-            with open(out_path, "w", encoding="utf-8") as fh:
-                fh.write(report)
-            ctx["saved"] = out_path
-            return {"saved": os.path.basename(out_path), "path": out_path}
-
         return {"error": "unknown tool %r" % name}
     except Exception as e:  # a tool bug must not crash the agent
         return {"error": "tool %s raised %s: %s" % (name, type(e).__name__, e)}
@@ -113,3 +89,33 @@ def summarize_result(name, result):
     if name == "save_report":
         return "saved %s" % result.get("saved")
     return "ok"
+
+
+def save_report(ctx, cfg):
+    """Deterministically write the report from validated context state.
+
+    This function is intentionally not included in ``TOOL_SCHEMAS``; models must not
+    be able to save arbitrary text into the considerations section.
+    """
+    if not ctx.get("rows"):
+        return {"error": "nothing extracted to report yet"}
+    if not ctx.get("flagging_completed"):
+        return {"error": "cannot save report before deterministic flagging completes"}
+    considerations = ctx.get("considerations") or []
+    if isinstance(considerations, list):
+        considerations_text = "\n".join(str(item) for item in considerations if str(item).strip())
+    else:
+        considerations_text = str(considerations)
+    if not considerations_text.strip():
+        limitations = ctx.get("limitations") or []
+        if limitations:
+            considerations_text = "\n".join("- %s" % item for item in limitations)
+    report = labtools.build_report(
+        ctx["rows"], ctx.get("abnormal", []), considerations_text,
+        source=ctx.get("input_path"), engine=ctx.get("engine", "unknown"),
+        model_label=cfg.get("model", "unknown"))
+    out_path = ctx.get("out_path") or labtools.DEFAULT_OUT
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(report)
+    ctx["saved"] = out_path
+    return {"saved": os.path.basename(out_path), "path": out_path}

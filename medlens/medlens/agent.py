@@ -1,101 +1,98 @@
 # -*- coding: utf-8 -*-
-"""The agent loop: the model DRIVES, selecting and calling tools until the report
-is saved. We just execute the tools it chooses and feed results back — exactly
-like adaseli, but with the medical tools and the safety system prompt."""
+"""Deterministic MEDLENS orchestration.
 
-import json
+This module intentionally keeps extraction, flagging, and report saving under Python
+control. Language-model research agents are not wired in yet; until they are, the
+workflow executes through deterministic flagging and writes a report that clearly
+states evidence research was not performed.
+"""
 
-from . import providers, feedback, labtools
-from .config import DISCLAIMER, AGENT_SYSTEM
-from .tools import TOOL_SCHEMAS, run_tool, summarize_result
-
-
-TASK = (
-    "Review the synthetic lab report under review. Use your tools: extract it, flag "
-    "it deterministically with flag_results, then write bounded considerations for "
-    "any flagged abnormalities and call save_report. Follow all safety rules."
-)
+from . import feedback
+from .config import DISCLAIMER
+from .tools import run_tool, summarize_result, save_report
 
 
-def run_review(cfg, input_path, out_path, max_steps=8):
-    """Run the agent over one (synthetic) report. Returns the saved path or None."""
-    feedback.header(DISCLAIMER, source=input_path, base_url=cfg["base_url"], model=cfg["model"])
+def _record_tool_result(name, result):
+    ok = not (isinstance(result, dict) and "error" in result)
+    feedback.tool_result(summarize_result(name, result), ok)
+    return ok
 
-    ctx = {"input_path": input_path, "out_path": out_path}
-    messages = [{"role": "system", "content": AGENT_SYSTEM},
-                {"role": "user", "content": TASK}]
-    last_text = ""
 
-    for step in range(1, max_steps + 1):
-        # Bail before the next LLM call if the report has already been saved.
-        if ctx.get("saved"):
-            break
+def run_review(
+    cfg,
+    input_path,
+    out_path,
+    research_mode="off",
+    conditions=None,
+    max_queries=8,
+    max_sources=8,
+    assurance_mode="basic",
+    enable_query_expansion=False,
+    enable_scientific_critic=True,
+    verifier_profile_ids=None,
+    max_steps=None,
+):
+    """Run deterministic extraction and flagging, then save a bounded report.
 
-        # tool_choice strategy: turn 1 forces extract_lab_report (it's always the
-        # first step — no point letting the model 'decide'); subsequent turns use
-        # 'required' so the model MUST emit a tool call (no reasoning chatter).
-        # This means reasoning models can't burn their token budget thinking
-        # before acting — the API guarantees they emit a tool call.
-        if step == 1:
-            choice = "extract_lab_report"
-        elif not ctx.get("saved"):
-            choice = "required"
-        else:
-            choice = "auto"
+    The expanded research-agent workflow in the runbook is deliberately not enabled
+    yet. This implementation executes safely up to deterministic flagging results and
+    fails closed by omitting model-generated medical considerations.
+    """
+    feedback.header(DISCLAIMER, source=input_path, base_url=cfg.get("base_url", ""), model=cfg.get("model", "unknown"))
 
-        with feedback.working("agent deciding next step (tool_choice=%s)" % choice):
-            s = providers.chat(cfg, messages, TOOL_SCHEMAS, tool_choice=choice)
-        if s.get("error"):
-            feedback.error(s["error"])
-            return None
-        if s["raw"] is not None:
-            messages.append(s["raw"])
-        if s["text"].strip():
-            last_text = s["text"]
-            feedback.thinking(s["text"])
-        if not s["tool_calls"]:
-            break  # agent has nothing more to do (only reachable on tool_choice='auto')
+    ctx = {
+        "input_path": input_path,
+        "out_path": out_path,
+        "rows": [],
+        "abnormal": [],
+        "queries": [],
+        "evidence": [],
+        "claim_candidates": [],
+        "verification_results": [],
+        "claim_decisions": [],
+        "considerations": [],
+        "critique_findings": [],
+        "agent_invocations": [],
+        "model_profiles": [],
+        "limitations": [],
+        "audit_path": None,
+        "saved": None,
+        "flagging_completed": False,
+    }
 
-        results = []
-        for tc in s["tool_calls"]:
-            feedback.tool_call(tc["name"], tc["input"])
-            with feedback.working(tc["name"]):
-                res = run_tool(tc["name"], tc["input"], ctx, cfg)
-            ok = not (isinstance(res, dict) and "error" in res)
-            feedback.tool_result(summarize_result(tc["name"], res), ok)
-            results.append({"id": tc["id"], "name": tc["name"], "output": json.dumps(res)[:6000]})
-        providers.add_tool_results(messages, results)
-    else:
-        feedback.note("reached max steps")
-
-    # Safety net: if the agent never called save_report but we did extract, save a
-    # report anyway (using its last text as considerations) so output is never lost.
-    if not ctx.get("saved") and ctx.get("rows"):
-        feedback.note("agent did not call save_report; saving with available data")
-        report = labtools.build_report(
-            ctx["rows"], ctx.get("abnormal", []),
-            considerations=s.get("text", "") if isinstance(s, dict) else "",
-            source=input_path, engine=ctx.get("engine", "unknown"), model_label=cfg["model"])
-        with open(out_path, "w", encoding="utf-8") as fh:
-            fh.write(report)
-        ctx["saved"] = out_path
-
-    if ctx.get("saved"):
-        feedback.done(ctx["saved"])
-        return ctx["saved"]
-
-    # Nothing was extracted at all → the model never called a tool. The most
-    # common cause is a model that doesn't do tool calling.
+    feedback.tool_call("extract_lab_report", {})
+    with feedback.working("extract_lab_report"):
+        extracted = run_tool("extract_lab_report", {}, ctx, cfg)
+    if not _record_tool_result("extract_lab_report", extracted):
+        feedback.error(extracted.get("error", "extraction failed"))
+        return None
     if not ctx.get("rows"):
-        feedback.error("the model returned no tool calls, so nothing was extracted.")
-        if last_text:
-            feedback.note("model said: %s" % last_text[:300])
-        feedback.note("Common causes (see the raw assistant message in the ERROR log above):")
-        feedback.note("  1) Reasoning model — its <think> trace ate the token budget before the "
-                      "structured tool_call was emitted. Try: --no-reasoning  (or --max-tokens 16384).")
-        feedback.note("  2) Endpoint genuinely doesn't support tool calling. Pick another model — "
-                      "your choice — e.g. meta-llama/llama-3.3-70b-instruct:free, "
-                      "qwen/qwen3-coder:free, openai/gpt-oss-120b:free.")
+        feedback.error("extraction returned zero lab results; no report was generated.")
+        return None
+
+    feedback.tool_call("flag_results", {})
+    with feedback.working("flag_results"):
+        flagged = run_tool("flag_results", {}, ctx, cfg)
+    if not _record_tool_result("flag_results", flagged):
+        feedback.error(flagged.get("error", "flagging failed"))
+        return None
+    ctx["flagging_completed"] = True
+
+    if not ctx.get("abnormal"):
+        ctx["normal_panel_summary"] = (
+            "No values were flagged outside their printed reference ranges by deterministic arithmetic."
+        )
+    if research_mode == "off":
+        ctx["limitations"].append("Evidence research was disabled.")
     else:
-        feedback.error("no report produced.")
-    return None
+        ctx["limitations"].append(
+            "Evidence research agents are not implemented in this build; condition considerations were omitted."
+        )
+
+    saved = save_report(ctx, cfg)
+    if isinstance(saved, dict) and saved.get("error"):
+        feedback.error(saved["error"])
+        return None
+    feedback.tool_result(summarize_result("save_report", saved), True)
+    feedback.done(ctx["saved"])
+    return ctx["saved"]
