@@ -313,6 +313,14 @@ def list_models(cfg, name_filter=None, free_only=False, tools_only=False):
         is_free = mid.endswith(":free") or pricing.get("prompt") in ("0", "0.0", 0)
         supported = m.get("supported_parameters", []) or []
         supports_tools = "tools" in supported or "tool_choice" in supported
+        # Ollama's OpenAI-compatible /models endpoint commonly omits OpenRouter's
+        # `supported_parameters` metadata. For local catalogue display, mark known
+        # configured tool-capable families as usable so `--provider ollama --tools`
+        # remains helpful; the actual run still depends on the pulled local model.
+        if cfg.get("base_url", "").rstrip("/").endswith(":11434/v1"):
+            supports_tools = supports_tools or any(
+                token in mid.lower() for token in ("qwen", "nemotron")
+            )
         if nf and nf not in mid.lower():
             continue
         if free_only and not is_free:

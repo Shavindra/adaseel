@@ -61,7 +61,7 @@ def _ensure_sample():
 def review(
     input: Optional[str] = typer.Option(None, "--input", help="path to a SYNTHETIC scan; default: sample"),
     provider: Optional[str] = typer.Option(None, "--provider",
-                                           help="openrouter|groq — preset base-url + key env. "
+                                           help="openrouter|ollama|groq — preset base-url + key env. "
                                                 "Omit (on a TTY) to be prompted."),
     base_url: Optional[str] = typer.Option(None, "--base-url",
                                            help="OpenAI-compatible endpoint (overrides --provider)"),
@@ -110,7 +110,7 @@ def review(
 
 @app.command()
 def check(
-    provider: Optional[str] = typer.Option(None, "--provider", help="openrouter|groq"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="openrouter|ollama|groq"),
     base_url: Optional[str] = typer.Option(None, "--base-url"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
@@ -132,7 +132,7 @@ def check(
 
 @app.command()
 def models(
-    provider: Optional[str] = typer.Option(None, "--provider", help="openrouter|groq"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="openrouter|ollama|groq"),
     base_url: Optional[str] = typer.Option(None, "--base-url"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     filter: Optional[str] = typer.Option(None, "--filter", help="only ids containing this substring"),

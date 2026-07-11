@@ -3,9 +3,10 @@
 > **EDUCATIONAL PROTOTYPE — NOT FOR CLINICAL USE. Not a medical device. Outputs are
 > unverified and may be wrong. Consult a qualified clinician.**
 
-An **agentic** medical lab-report assistant, built as a research / educational
-prototype — the same shape as [adaseli](../README.md): an LLM **agent drives the
-work by selecting and calling tools**, rather than a hardwired pipeline.
+A medical lab-report research prototype. The current implemented path is a
+controlled deterministic workflow: MEDLENS extracts a synthetic report, flags values
+against the printed reference ranges, and saves a report without letting a model
+drive workflow order or write unvalidated medical considerations.
 
 ## Scope & safety (built in, not bolted on)
 
@@ -20,29 +21,31 @@ work by selecting and calling tools**, rather than a hardwired pipeline.
   default is OpenRouter, but point `--base-url` at a local Ollama to keep
   everything on-machine.
 
-## Agentic design (and why it's still safe)
+## Deterministic design implemented so far
 
-The agent is given three **tools** and decides when to call them — it is not a
-fixed sequence:
+The completed runbook milestone is:
 
-| Tool | What it does | Who computes it |
+```text
+extract_lab_report -> flag_results -> deterministic save
+```
+
+| Step | What it does | Who computes it |
 | --- | --- | --- |
-| `extract_lab_report` | OCR the scan → structured results | Docling + Surya (local) |
+| `extract_lab_report` | OCR/transcript fallback → structured results | Docling/Surya or transcript fallback |
 | `flag_results` | mark each value high/low/normal vs the **printed** range | **deterministic Python — no LLM** |
-| `save_report` | write the Markdown report | template + the agent's bounded text |
+| internal `save_report` | write the Markdown report after flagging completed | deterministic template |
 
-The safety-critical parts are **tools, not model output**:
+The safety-critical parts are deterministic Python, not model output:
 
-- The extracted values are **cached server-side** (in a shared `ctx`), so the model
-  can't pass in or alter numbers — `flag_results` flags the *cached* rows.
-- High/low/normal is pure arithmetic in `flag_results`; the system prompt forbids
-  the agent from judging abnormalities itself or inventing a reference range. A
-  missing range becomes `cannot_assess — no range provided`, never a guess.
-- The report's tables and flags are rebuilt from the cached deterministic data; the
-  LLM only contributes the bounded **considerations** text.
-
-This mirrors adaseli, where deterministic work (`compute_hydrophobicity`) is a tool
-and values are cached so the agent orchestrates without tampering.
+- The extracted values are cached in a shared context, so later steps do not accept
+  model-produced rows, numeric values, ranges, or flags.
+- High/low/normal is pure arithmetic in `flag_results`; a missing range becomes
+  `cannot_assess — no range provided`, never a guess.
+- `save_report` is no longer advertised as a model-callable tool. It refuses to
+  write until deterministic flagging has completed.
+- Until bounded evidence-research agents and validators are implemented, the report
+  omits model-generated medical considerations and records that evidence research
+  was disabled or unavailable.
 
 ## Install
 
@@ -57,45 +60,47 @@ models on first use).
 ## Run
 
 ```bash
-# Run with NO flags on a terminal and MEDLENS prompts you for the gateway
-# (OpenRouter / Groq) and then the model (Qwen / Nemotron / paste an id):
-export OPENROUTER_API_KEY=sk-or-v1-...           # OpenRouter key, OR…
-export GROQ_API_KEY=gsk_...                      # …a Groq key
-python -m medlens review                         # → interactive provider/model prompt
+# OpenRouter hosted examples. Set a key once, then use the qwen/nemotron shorthands.
+export OPENROUTER_API_KEY=sk-or-v1-...
+python -m medlens review --provider openrouter --model qwen --no-pick
+python -m medlens review --provider openrouter --model nemotron --no-reasoning --no-pick
 
-# Or pin it non-interactively. --provider sets the base-url + key env; --model
-# accepts the shorthands 'qwen'/'nemotron' or any full id:
-python -m medlens review --provider openrouter --model nemotron
-python -m medlens review --provider openrouter --model qwen
-python -m medlens review --provider groq       --model qwen   # Groq has no Nemotron
-python -m medlens review --no-pick               # skip the prompt, use defaults
+# Local Ollama examples. Pull models before running.
+ollama pull qwen3.5
+ollama pull nemotron-3-nano
+python -m medlens review --provider ollama --model qwen --no-pick
+python -m medlens review --provider ollama --model nemotron --no-pick
 
-# Optional: list a provider's models so YOU can pick one that supports tool calling
-python -m medlens models --provider groq --tools
+# Groq remains available for Qwen-only testing; Groq has no Nemotron preset here.
+export GROQ_API_KEY=gsk_...
+python -m medlens review --provider groq --model qwen --no-pick
+
+# Optional endpoint/catalogue checks.
+python -m medlens check --provider openrouter --model qwen
+python -m medlens check --provider ollama --model qwen
 python -m medlens models --provider openrouter --free --tools
+python -m medlens models --provider ollama --tools
 
-# Check the endpoint is reachable
-python -m medlens check --provider groq
+# Run the deterministic flow OFFLINE: no API key, model runtime, or network.
+python -m medlens selftest --quiet --out /tmp/medlens_flagging_report.md
 
-# Fully local via Ollama (pick a tool-calling model)
-python -m medlens review --base-url http://localhost:11434/v1 --model qwen2.5
-
-# Run the whole agent loop OFFLINE (no model/key) — uses a scripted fake model
-python -m medlens selftest -v
-
-# (Re)generate the synthetic sample scan
+# (Re)generate the synthetic sample scan.
 python -m medlens sample
 ```
 
-> You choose the model; MEDLENS never picks or switches it. The agent does need a
-> model whose endpoint supports **tool calling** — if the one you pick returns no
-> tool calls, MEDLENS says so (add `-v` for the raw response) and the `models
-> --free --tools` command lists candidates, but the choice stays yours.
+Checked-in script examples are available under `examples/`:
 
-The run streams the agent's tool calls (with a spinner) and writes
-**`lab_report_review.md`** (disclaimer header, extracted results, deterministic
-flagged abnormalities, bounded considerations, limitations & coverage). See
-`example_lab_report_review.md` for a saved example.
+```bash
+./examples/openrouter_qwen.sh
+./examples/openrouter_nemotron.sh
+./examples/ollama_qwen.sh
+./examples/ollama_nemotron.sh
+```
+
+See `docs/USAGE_EXAMPLES.md` for copy/paste commands and setup notes. The current
+review flow writes **`lab_report_review.md`** by default with disclaimer header,
+extracted results, deterministic flagged abnormalities, and limitations/coverage.
+See `example_lab_report_review.md` for a saved example.
 
 ## Package layout
 
@@ -117,9 +122,9 @@ medlens/
 
 | Flag / env | Purpose | Default |
 | --- | --- | --- |
-| `--provider` | `openrouter` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
+| `--provider` | `openrouter` \| `ollama` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
 | `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint (overrides `--provider`) | `https://openrouter.ai/api/v1` |
-| `--model` / `MEDLENS_MODEL` | model id, or shorthand `qwen` / `nemotron` (needs tool calling) | `nvidia/nemotron-nano-9b-v2:free` |
+| `--model` / `MEDLENS_MODEL` | model id, or shorthand `qwen` / `nemotron` for providers that define those presets | `nvidia/nemotron-nano-9b-v2:free` |
 | `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` |
 | `--no-pick` | skip the interactive provider/model prompt | off |
 | `--input` | path to a synthetic scan | the bundled sample |
@@ -127,8 +132,9 @@ medlens/
 
 ## Limitations
 
-- Not a clinical tool. The considerations are AI-generated, unverified, and may be
-  wrong; they exist to be checked by a qualified clinician.
+- Not a clinical tool. Research/consideration generation is intentionally omitted in
+  the current deterministic milestone until evidence-backed agents and validators are
+  implemented.
 - OCR can misread scans; unreadable values are flagged, not guessed.
 - Only values with a printed reference range are assessed; others are reported as
   `cannot_assess`, never compared against an assumed range.

@@ -12,10 +12,10 @@ DISCLAIMER = (
 )
 
 # Vendor-agnostic LLM: any OpenAI-compatible /chat/completions endpoint over plain
-# HTTP (no vendor SDK). Default = OpenRouter (free, tool-calling NVIDIA Nemotron),
-# matching adaseli. Point it elsewhere by swapping base_url/model: a local Ollama
-# (http://localhost:11434/v1) for fully-local runs, or any hosted gateway
-# (Groq/Gemini/…). The api_key is required by hosted APIs, ignored by Ollama.
+# HTTP (no vendor SDK). Default = OpenRouter. Point it elsewhere by swapping
+# base_url/model: a local Ollama (http://localhost:11434/v1) for fully-local
+# checks, or any hosted gateway (Groq/Gemini/…). The api_key is required by
+# hosted APIs, ignored by Ollama.
 DEFAULT_BASE_URL = os.environ.get("MEDLENS_BASE_URL", "https://openrouter.ai/api/v1")
 # YOU choose the model — set it here or via --model / MEDLENS_MODEL. The code never
 # picks or switches models for you. Note the agent needs a model whose endpoint
@@ -34,9 +34,11 @@ DEFAULT_API_KEY = (os.environ.get("MEDLENS_API_KEY")
 #
 # NOTE on model ids: these are best-known defaults for a POC and DO drift over time.
 # If a run 404s on the model, list the live catalogue and pick one:
-#     python -m medlens models --provider groq --tools
 #     python -m medlens models --provider openrouter --free --tools
-# Groq does NOT host NVIDIA Nemotron — only OpenRouter does here.
+#     python -m medlens models --provider ollama --tools
+#     python -m medlens models --provider groq --tools
+# Groq does NOT host NVIDIA Nemotron — OpenRouter and Ollama are the configured
+# Nemotron paths here.
 PROVIDERS = {
     "openrouter": {
         "label": "OpenRouter",
@@ -47,6 +49,19 @@ PROVIDERS = {
             "qwen": "qwen/qwen3-30b-a3b:free",
         },
         "default_model": "nvidia/nemotron-nano-9b-v2:free",
+    },
+    "ollama": {
+        "label": "Ollama",
+        "base_url": "http://localhost:11434/v1",
+        "key_envs": [],
+        "models": {
+            # Pull first with: `ollama pull qwen3.5` or
+            # `ollama pull nemotron-3-nano`. These Ollama catalogue names expose
+            # tool-capable model families and work through Ollama's OpenAI API.
+            "qwen": "qwen3.5",
+            "nemotron": "nemotron-3-nano",
+        },
+        "default_model": "qwen3.5",
     },
     "groq": {
         "label": "Groq",
@@ -96,30 +111,12 @@ def resolve_endpoint(provider=None, base_url=None, model=None, api_key=None):
     mid = resolve_model(prov, model or default_model)
     return prov, base, mid, resolve_api_key(prov, api_key)
 
-# The agent's system prompt: it tells the model which tools exist, the workflow,
-# and the hard safety rules. The model DRIVES — it chooses to call the tools — but
-# the prompt forbids it from doing the deterministic flagging itself.
+# Legacy safety prompt retained for future bounded-language roles. The current
+# review path is deterministic through extraction and flagging; no model prompt is
+# used to decide workflow order or save report content.
 AGENT_SYSTEM = (
-    "You are MEDLENS, a cautious clinical decision-SUPPORT agent for an EDUCATIONAL "
-    "PROTOTYPE working ONLY on synthetic data. You are NOT a doctor and you do NOT "
-    "diagnose. Your audience is a qualified clinician who verifies everything.\n\n"
-    "You work by calling tools. Available tools:\n"
-    "  - extract_lab_report: OCR the report into structured results.\n"
-    "  - flag_results: DETERMINISTICALLY mark each value high/low/normal against the "
-    "range printed on the report. You MUST use this tool for every high/low/normal "
-    "judgement — never decide an abnormality yourself, and never invent or assume a "
-    "reference range.\n"
-    "  - save_report: write the final Markdown report. Pass your bounded "
-    "'considerations' text as the argument.\n\n"
-    "Workflow: call extract_lab_report, then flag_results, then write your "
-    "considerations and call save_report. Then stop.\n\n"
-    "When you write considerations for the flagged abnormal results:\n"
-    "  - Offer only POSSIBLE, non-exhaustive categories of contributing factors.\n"
-    "  - Never name a single definitive cause; never give a diagnosis, treatment, "
-    "dose, or patient instruction.\n"
-    "  - State uncertainty explicitly and flag findings that are NON-SPECIFIC.\n"
-    "  - End each consideration noting it requires clinical correlation.\n"
-    "  - Base comments only on the values the tools returned; do not invent results.\n"
-    "  - If nothing is flagged, say plainly the panel is unremarkable AND that this "
-    "does not rule out clinical concerns."
+    "You are MEDLENS, a cautious educational prototype working only on synthetic "
+    "lab-report data. Do not diagnose, prescribe, or give patient-specific "
+    "instructions. Deterministic Python tools, not model text, are authoritative for "
+    "extraction, flagging, validation, and saving."
 )
