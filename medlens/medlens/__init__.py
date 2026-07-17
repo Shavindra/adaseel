@@ -1,20 +1,16 @@
 # -*- coding: utf-8 -*-
-"""MEDLENS — an agentic medical lab-report assistant (EDUCATIONAL PROTOTYPE).
+"""MEDLENS — an educational synthetic lab-report research prototype.
 
-Built the same way as adaseli: an LLM **agent drives the work by selecting and
-calling tools**, rather than a hardwired pipeline. The agent decides to extract,
-to flag, and to save — but the safety-critical parts are deterministic *tools*,
-and the extracted values are cached so the model cannot tamper with them.
+The currently implemented workflow is deterministic:
 
-    config      disclaimer, defaults, the agent's system prompt
-    feedback    rich progress output (spinner, per-tool status)
-    labtools    domain logic: OCR extract, deterministic flagging, sample, report
-    tools       the agent-facing tools (schemas + dispatcher) over labtools
-    providers   vendor-agnostic LLM (OpenAI-compatible tool-calling) + offline fake
-    agent       the tool-calling agent loop
-    cli         Typer command-line interface
+    extract_lab_report -> flag_results -> deterministic save
+
+Extraction data and high/low calculations remain in Python-controlled state; no
+model chooses the workflow order or can alter result rows, ranges, flags, or report
+saving. Evidence-backed language-model research roles are planned in the runbook but
+are not enabled in this release.
 
 NOT a clinical tool. Synthetic data only. Decision-support, not diagnosis.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
