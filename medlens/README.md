@@ -3,151 +3,158 @@
 > **EDUCATIONAL PROTOTYPE — NOT FOR CLINICAL USE. Not a medical device. Outputs are
 > unverified and may be wrong. Consult a qualified clinician.**
 
-A medical lab-report research prototype. The current implemented path is a
-controlled deterministic workflow: MEDLENS extracts a synthetic report, flags values
-against the printed reference ranges, and saves a report without letting a model
-drive workflow order or write unvalidated medical considerations.
-
-## Scope & safety (built in, not bolted on)
-
-- **Synthetic data only.** Ships a synthetic sample report; never reads, requests,
-  or stores real patient data.
-- **Decision-support, not diagnosis.** The agent produces *possibilities to discuss
-  with a clinician*, with explicit uncertainty.
-- **Human-in-the-loop.** Every reasoning output is an **unverified draft** for a
-  qualified clinician; the report is structured to make that obvious.
-- **Prominent disclaimer** leads (and closes) every report and every run.
-- **Local-capable.** OCR runs locally; the reasoning model is vendor-agnostic —
-  default is OpenRouter, but point `--base-url` at a local Ollama to keep
-  everything on-machine.
-
-## Deterministic design implemented so far
-
-The completed runbook milestone is:
+MEDLENS currently executes the multi-agent research plan only through deterministic
+result flagging:
 
 ```text
-extract_lab_report -> flag_results -> deterministic save
+input -> extract -> resolve report type -> flag supplied numeric ranges -> persist trace
 ```
 
-| Step | What it does | Who computes it |
-| --- | --- | --- |
-| `extract_lab_report` | OCR/transcript fallback → structured results | Docling/Surya or transcript fallback |
-| `flag_results` | mark each value high/low/normal vs the **printed** range | **deterministic Python — no LLM** |
-| internal `save_report` | write the Markdown report after flagging completed | deterministic template |
+It is not restricted to a Full Blood Count or any other fixed panel. The bundled FBC
+is one synthetic fixture. A report may declare its own type, the user may supply a
+free-text type, or MEDLENS records the type as unresolved rather than guessing.
 
-The safety-critical parts are deterministic Python, not model output:
+No model, provider, API key, network research, diagnosis, or medical consideration is
+used in this milestone.
 
-- The extracted values are cached in a shared context, so later steps do not accept
-  model-produced rows, numeric values, ranges, or flags.
-- High/low/normal is pure arithmetic in `flag_results`; a missing range becomes
-  `cannot_assess — no range provided`, never a guess.
-- `save_report` is no longer advertised as a model-callable tool. It refuses to
-  write until deterministic flagging has completed.
-- Until bounded evidence-research agents and validators are implemented, the report
-  omits model-generated medical considerations and records that evidence research
-  was disabled or unavailable.
+## Inputs
+
+- Native `.txt`, `.md`, `.csv`, and `.tsv`.
+- Images and PDFs through the optional local Docling/Surya OCR extra.
+- Images and PDFs with `--transcript path/to/report.txt`.
+- Images and PDFs with an automatically detected same-stem companion transcript.
+
+MEDLENS never falls back to the bundled sample transcript for an unrelated report.
+If neither text nor OCR is available, the run fails with a trace and manifest.
+
+Report-type resolution order:
+
+1. `--report-type "Any user-supplied laboratory report type"`.
+2. An explicit `Report type:`, `Panel:`, `Profile:`, or `Investigation:` label in the
+   document.
+3. A conservative versioned deterministic signature for a small set of common panels.
+4. `Unspecified laboratory report`.
+
+The report type is context only. It never changes numeric flagging rules.
+
+## Deterministic flagging
+
+`flag_results()` is the sole authority for `high`, `low`, and `normal`. It assesses a
+plain numeric result only against that row's supplied numeric interval or inequality.
+
+- No reference interval → `cannot_assess — no range provided`.
+- Qualitative result or complex interval → `cannot_assess`.
+- Qualified numeric result such as `<0.1` or `>90` → `cannot_assess` until a
+  dedicated interval-censoring rule is implemented.
+- Blank or unreadable result → `unparsed`.
+- A report-provided flag is preserved but never trusted as the calculation.
+
+This deliberately fails closed for report formats that require age, sex, specimen,
+method-specific, categorical, or clinical interpretation.
 
 ## Install
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-`requests`, `pillow`, `typer`, `rich` are enough to run the agent end-to-end via the
-transcript fallback. Add `docling` + `surya-ocr` for real OCR (heavy; downloads
-models on first use).
+For image/PDF OCR:
+
+```bash
+python -m pip install -e ".[ocr]"
+```
+
+Ordinary tests and the transcript-based self-test do not require OCR packages, a
+model runtime, an API key, or network access.
 
 ## Run
 
-Create a local config once so scripts and repeated runs do not need exported keys:
-
 ```bash
-cp medlens/.env.example .env
-# edit .env and set OPENROUTER_API_KEY, MEDLENS_PROVIDER, MEDLENS_MODEL, etc.
+# Native text/CSV/TSV/Markdown
+python -m medlens review --input examples/reports/renal_profile.csv
+
+# Image/PDF with a transcript you already have
+python -m medlens review \
+  --input sample_lab_report.png \
+  --transcript sample_lab_report.txt
+
+# User-provided report type
+python -m medlens review \
+  --input examples/reports/urinalysis.txt \
+  --report-type "Urinalysis"
+
+# Structured artefacts only
+python -m medlens review \
+  --input examples/reports/urinalysis.txt \
+  --no-report
+
+# Full observable diagnostic trace after secret redaction
+DEBUG=true python -m medlens review \
+  --input examples/reports/renal_profile.csv
+
+# Offline smoke test
+python -m medlens selftest --quiet
 ```
 
-With no provider/model flags, `python -m medlens review --no-pick` defaults to
-OpenRouter Nemotron (`nvidia/nemotron-nano-9b-v2:free`).
+All checked-in commands and sample inputs are under [`examples/`](examples/).
 
-```bash
-# OpenRouter hosted examples. Use .env or set OPENROUTER_API_KEY in your shell.
-python -m medlens review --provider openrouter --model qwen --no-pick
-python -m medlens review --provider openrouter --model nemotron --no-reasoning --no-pick
+## Run bundle
 
-# Local Ollama examples. Pull models before running.
-ollama pull qwen3.5
-ollama pull nemotron-3-nano
-python -m medlens review --provider ollama --model qwen --no-pick
-python -m medlens review --provider ollama --model nemotron --no-pick
+Every execution creates `runs/<run-id>/` unless `--runs-dir` changes the parent.
+Existing run directories are never overwritten.
 
-# Groq remains available for Qwen-only testing; Groq has no Nemotron preset here.
-export GROQ_API_KEY=gsk_...
-python -m medlens review --provider groq --model qwen --no-pick
-
-# Optional endpoint/catalogue checks.
-python -m medlens check --provider openrouter --model qwen
-python -m medlens check --provider ollama --model qwen
-python -m medlens models --provider openrouter --free --tools
-python -m medlens models --provider ollama --tools
-
-# Run the deterministic flow OFFLINE: no API key, model runtime, or network.
-python -m medlens selftest --quiet --out /tmp/medlens_flagging_report.md
-
-# (Re)generate the synthetic sample scan.
-python -m medlens sample
-```
-
-Checked-in script examples are available under `examples/`:
-
-```bash
-./examples/openrouter_qwen.sh
-./examples/openrouter_nemotron.sh
-./examples/ollama_qwen.sh
-./examples/ollama_nemotron.sh
-```
-
-See `docs/USAGE_EXAMPLES.md` for copy/paste commands and setup notes. The current
-review flow writes **`lab_report_review.md`** by default with disclaimer header,
-extracted results, deterministic flagged abnormalities, and limitations/coverage.
-See `example_lab_report_review.md` for a saved example.
-
-## Package layout
-
-```
-medlens/
-  medlens/
-    config.py     disclaimer, defaults, the agent system prompt (workflow + safety)
-    feedback.py   rich spinner + per-tool status
-    labtools.py   OCR extract, deterministic flagging, sample, report assembly
-    tools.py      agent-facing tools (schemas + dispatcher; caches values in ctx)
-    providers.py  vendor-agnostic OpenAI-compatible tool-calling client + fake
-    agent.py      the tool-calling agent loop
-    cli.py        Typer CLI (review / check / sample / selftest)
-  sample_lab_report.png / .txt     synthetic FBC scan + OCR-equivalent transcript
-  example_lab_report_review.md     a saved example run
-```
-
-## Configuration
-
-| Flag / env | Purpose | Default |
+| Artefact | Always | Purpose |
 | --- | --- | --- |
-| `--provider` / `MEDLENS_PROVIDER` | `openrouter` \| `ollama` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
-| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint (overrides provider base URL) | `https://openrouter.ai/api/v1` |
-| `--model` / `MEDLENS_MODEL` | model id, or shorthand `qwen` / `nemotron` for providers that define those presets | `nvidia/nemotron-nano-9b-v2:free` |
-| `--api-key` / `MEDLENS_API_KEY` | API key; may be stored in local `.env` for repeated runs | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` |
-| `--no-pick` | skip the interactive provider/model prompt | off |
-| `--input` | path to a synthetic scan | the bundled sample |
-| `--out` | report output path | `lab_report_review.md` |
+| `extracted_results.json` | yes | canonical parsed rows, extraction engine, report context |
+| `flagged_results.json` | yes | rows with flags, methods, reason codes, and summary counts |
+| `events.jsonl` | yes | ordered actions, decisions, failures, timings, and hashes |
+| `manifest.json` | yes | final status, completed stages, artefact inventory, trace hash |
+| `flagging_report.md` | default | human-readable intermediate result; disable with `--no-report` |
 
-MEDLENS automatically loads local `.env` files from the repo root, `medlens/.env`,
-or the current working directory. Copy `medlens/.env.example` to `.env` for repeated
-provider/model testing without re-exporting API keys.
+The Markdown output stops at flagging. It does not create an empty or fabricated
+medical-considerations section.
 
-## Limitations
+## Explainability and debug mode
 
-- Not a clinical tool. Research/consideration generation is intentionally omitted in
-  the current deterministic milestone until evidence-backed agents and validators are
-  implemented.
-- OCR can misread scans; unreadable values are flagged, not guessed.
-- Only values with a printed reference range are assessed; others are reported as
-  `cannot_assess`, never compared against an assumed range.
+Normal trace events include the action order, report-type decision, one reason-coded
+assessment per result, stage durations, failures, counts, and artefact hashes. Exact
+values remain in the structured result artefacts rather than being duplicated into
+the normal trace.
+
+`DEBUG=true` adds full observable stage inputs/outputs—including paths, OCR/transcript
+text, exact rows and values, tool results, report text, and exception messages—to the
+same event trace after recursive secret redaction. Debug traces may contain sensitive
+report contents and must not be shared.
+
+Hidden chain-of-thought is never stored. Future agent roles must instead emit explicit
+bounded rationales, assumptions, alternatives, evidence references, uncertainty, and
+decision codes as structured outputs. See
+[`docs/EXPLAINABILITY.md`](docs/EXPLAINABILITY.md).
+
+Generated `.env`, `runs/`, debug logs, and default report outputs are gitignored.
+
+## Verification
+
+```bash
+python -m unittest discover -s tests -v
+python -m medlens selftest --quiet
+python -m medlens review \
+  --input examples/reports/urinalysis.txt \
+  --no-report --quiet
+python -m build --wheel --no-isolation
+```
+
+## Scope still pending
+
+The following stages remain deliberately unimplemented on this branch:
+
+```text
+query plan -> evidence search -> synthesis -> validation -> verification
+-> deterministic claim decision -> scientific critique -> final research report
+```
+
+Their requirements remain in
+[`docs/MULTI_AGENT_RESEARCH_RUNBOOK.md`](docs/MULTI_AGENT_RESEARCH_RUNBOOK.md).

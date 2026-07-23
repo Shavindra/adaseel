@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
-"""MEDLENS — an educational synthetic lab-report research prototype.
+"""MEDLENS — traceable generic lab-report extraction and flagging.
 
-The currently implemented workflow is deterministic:
+Current implemented stop:
 
-    extract_lab_report -> flag_results -> deterministic save
+    input -> extract -> resolve report type -> deterministic flag -> artefacts
 
-Extraction data and high/low calculations remain in Python-controlled state; no
-model chooses the workflow order or can alter result rows, ranges, flags, or report
-saving. Evidence-backed language-model research roles are planned in the runbook but
-are not enabled in this release.
-
-NOT a clinical tool. Synthetic data only. Decision-support, not diagnosis.
+No model or network research is used in this milestone. It is an educational
+prototype, not a medical device or clinical interpretation system.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

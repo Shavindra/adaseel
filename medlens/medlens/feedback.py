@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Progress feedback for the agent. Uses rich for a spinner + colour when
-available; degrades to plain prints otherwise. Call configure(quiet=True) to
-silence (e.g. tests)."""
+"""Concise terminal feedback; durable detail belongs in ``events.jsonl``."""
 
-import json
+from __future__ import annotations
+
 from contextlib import contextmanager
 
 try:
     from rich.console import Console
-    from rich.rule import Rule
+
     _console = Console()
 except Exception:
     _console = None
@@ -16,14 +15,13 @@ except Exception:
 _QUIET = False
 
 
-def configure(quiet=False):
+def configure(quiet: bool = False) -> None:
     global _QUIET
     _QUIET = quiet
 
 
 @contextmanager
-def working(message):
-    """Animated spinner while the agent waits on the model or a tool."""
+def working(message: str):
     if _QUIET or _console is None:
         yield
         return
@@ -31,7 +29,7 @@ def working(message):
         yield
 
 
-def _say(plain, markup=None):
+def _say(plain: str, markup: str | None = None) -> None:
     if _QUIET:
         return
     if _console is not None:
@@ -40,47 +38,45 @@ def _say(plain, markup=None):
         print(plain)
 
 
-def header(disclaimer, source, base_url, model):
+def header(disclaimer: str, source: str, report_type: str | None, run_id: str) -> None:
     if _QUIET:
         return
+    body = (
+        "%s\n\nMEDLENS — deterministic extraction and flagging\n"
+        "source=%s\nreport_type=%s\nrun=%s\nmodel_usage=none"
+        % (disclaimer, source, report_type or "auto", run_id)
+    )
     if _console is not None:
         from rich.panel import Panel
-        body = ("[bold red]%s[/bold red]\n\n[bold]MEDLENS[/bold] — agentic lab-report review\n"
-                "source=%s\nmodel=%s @ %s" % (disclaimer, source, model, base_url))
+
         _console.print(Panel(body, border_style="red", expand=False))
     else:
-        print("=" * 72); print(disclaimer); print("-" * 72)
-        print("MEDLENS — source=%s  model=%s @ %s" % (source, model, base_url))
-        print("=" * 72)
+        print(body)
 
 
-def thinking(text):
-    t = (text or "").strip()
-    if t:
-        _say("  .. %s" % t[:400], "  [dim].. %s[/dim]" % t[:400])
+def stage_started(name: str) -> None:
+    _say("  -> %s" % name, "  [cyan]→ %s[/cyan]" % name)
 
 
-def tool_call(name, args):
-    detail = json.dumps(args)[:140] if args else ""
-    _say("  -> %s(%s)" % (name, detail),
-         "  [cyan]→ %s[/cyan][dim](%s)[/dim]" % (name, detail))
-
-
-def tool_result(summary, ok=True):
+def tool_result(summary: str, ok: bool = True) -> None:
     if ok:
         _say("     ok: %s" % summary, "     [green]✓[/green] %s" % summary)
     else:
         _say("     FAILED: %s" % summary, "     [red]✗[/red] %s" % summary)
 
 
-def note(msg):
-    _say("  - %s" % msg, "  [dim]%s[/dim]" % msg)
+def note(message: str) -> None:
+    _say("  - %s" % message, "  [dim]%s[/dim]" % message)
 
 
-def error(msg):
-    _say("  ERROR: %s" % msg, "  [bold red]ERROR[/bold red] %s" % msg)
+def error(message: str) -> None:
+    _say("  ERROR: %s" % message, "  [bold red]ERROR[/bold red] %s" % message)
 
 
-def done(path):
-    _say("\nreport saved: %s" % path,
-         "\n[bold green]✓ report saved[/bold green] %s" % path)
+def done(*, run_dir: str, report_path: str | None) -> None:
+    report_line = "\nreport: %s" % report_path if report_path else ""
+    _say(
+        "\nrun completed to deterministic flagging: %s%s" % (run_dir, report_line),
+        "\n[bold green]✓ completed to deterministic flagging[/bold green] %s%s"
+        % (run_dir, report_line),
+    )

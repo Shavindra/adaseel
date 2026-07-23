@@ -12,6 +12,8 @@ import logging
 
 import requests
 
+from .audit import debug_enabled, redact_for_log, sha256_bytes
+
 log = logging.getLogger(__name__)
 
 # Offline fake provider (registered by the selftest command).
@@ -29,9 +31,10 @@ def _describe_error(payload):
     OpenRouter wraps the real upstream failure in error.metadata (provider name +
     the provider's raw error). We surface all of it plus the full payload, so the
     actual reason is never swallowed."""
-    if not isinstance(payload, dict):
-        return str(payload)[:2000]
-    err = payload.get("error", payload)
+    safe_payload = redact_for_log(payload)
+    if not isinstance(safe_payload, dict):
+        return str(safe_payload)[:2000]
+    err = safe_payload.get("error", safe_payload)
     if isinstance(err, str):
         return err
     parts = []
@@ -48,7 +51,7 @@ def _describe_error(payload):
         if raw:
             parts.append("raw=%s" % (raw if isinstance(raw, str) else json.dumps(raw))[:1000])
     desc = " | ".join(parts)
-    full = json.dumps(payload)[:2000]
+    full = json.dumps(safe_payload)[:2000]
     return ("%s\n  full payload: %s" % (desc, full)) if desc else full
 
 
@@ -161,7 +164,14 @@ def chat(cfg, messages, tools=None, tool_choice=None):
     if err is not None:
         return {"text": "", "tool_calls": [], "raw": None, "error": err}
 
-    log.debug("LLM raw response: %s", json.dumps(data)[:2000])
+    if debug_enabled():
+        log.debug("LLM observable response (redacted): %s", json.dumps(redact_for_log(data))[:12000])
+    else:
+        log.debug(
+            "LLM response metadata: choices=%d error=%s",
+            len(data.get("choices") or []) if isinstance(data, dict) else 0,
+            bool(data.get("error")) if isinstance(data, dict) else False,
+        )
 
     # Some OpenAI-compatible gateways (OpenRouter included) return HTTP 200 with an
     # error object or an empty body instead of a completion. Trace it in full —
@@ -183,9 +193,16 @@ def chat(cfg, messages, tools=None, tool_choice=None):
     msg["content"] = text
     msg.setdefault("role", "assistant")
     finish = data["choices"][0].get("finish_reason")
-    # Reasoning models put their chain-of-thought in a separate `reasoning` field;
-    # surface it in diagnostics so a truncated reasoning trace is visible.
+    # Hidden reasoning content is never logged. Length/hash diagnostics are enough to
+    # diagnose truncation without treating chain-of-thought as an explainability API.
     reasoning = msg.get("reasoning") or msg.get("reasoning_content") or ""
+    reasoning_diagnostics = {}
+    for reasoning_key in ("reasoning", "reasoning_content", "chain_of_thought", "thinking"):
+        if reasoning_key in msg:
+            reasoning_diagnostics[reasoning_key] = redact_for_log(
+                msg.pop(reasoning_key),
+                key=reasoning_key,
+            )
     tool_calls = _parse_tool_calls(msg, text)
 
     # Specific diagnosis for the live failure pattern we hit: reasoning model
@@ -206,14 +223,25 @@ def chat(cfg, messages, tools=None, tool_choice=None):
             "off before the model could emit the tool call. Fix: either pass "
             "--no-reasoning (sends reasoning.exclude to OpenRouter so the trace is "
             "suppressed), bump --max-tokens (currently %s), or pick a non-reasoning "
-            "model. Last reasoning chars: %r",
-            len(reasoning), finish, body.get("max_tokens"), reasoning[-300:])
+            "model. reasoning_sha256=%s",
+            len(reasoning),
+            finish,
+            body.get("max_tokens"),
+            sha256_bytes(str(reasoning).encode("utf-8")),
+        )
     elif not tool_calls and finish == "tool_calls":
-        log.error("finish_reason='tool_calls' but no tool calls parsed; raw:\n%s",
-                  json.dumps(msg)[:2000])
+        log.error(
+            "finish_reason='tool_calls' but no tool calls parsed; metadata=%s",
+            json.dumps(redact_for_log(msg))[:2000],
+        )
     elif not tool_calls and not text:
-        log.warning("model returned empty message (finish_reason=%s); raw:\n%s",
-                    finish, json.dumps(msg)[:1000])
+        log.warning(
+            "model returned empty message (finish_reason=%s); metadata=%s",
+            finish,
+            json.dumps(redact_for_log(msg))[:1000],
+        )
+    if reasoning_diagnostics:
+        msg["hidden_reasoning_diagnostics"] = reasoning_diagnostics
     return {"text": text, "tool_calls": tool_calls, "raw": msg}
 
 

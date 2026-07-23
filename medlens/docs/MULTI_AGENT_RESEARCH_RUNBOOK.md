@@ -4,6 +4,30 @@
 
 Extend MEDLENS from a three-tool demo into a controlled, evidence-backed lab-report research workflow.
 
+### Current milestone amendment — execution through flagging
+
+The `codex/execute-plan-up-to-flagging-results` branch implements only:
+
+```text
+input -> extraction -> report-type resolution -> deterministic flagging
+```
+
+It must support laboratory reports beyond blood panels, accept an optional
+user-supplied report type, use an explicit document label when present, and otherwise
+remain unresolved rather than forcing a report into a known panel.
+
+Every run writes parsed/flagged JSON, an ordered JSONL event trace, and a manifest. A
+Markdown flagging view is optional. `DEBUG=true` makes the local event trace include
+full observable stage inputs/outputs—including OCR text, exact values, local paths,
+tool results, and errors—after recursive secret redaction. Such a debug trace is
+diagnostic data, not the shareable privacy-minimised audit bundle specified later,
+and must be gitignored.
+
+Hidden chain-of-thought remains excluded in every mode. Agentic explainability uses
+explicit structured rationales, assumptions, alternatives, evidence references,
+uncertainty, validator results, and stable reason codes. Provider hidden-reasoning
+fields may be represented only by presence/length/hash diagnostics.
+
 The implementation must:
 
 - Preserve deterministic extraction and high/low flagging.
@@ -2114,4 +2138,3 @@ All five TODOs are complete only when:
 - Role qualification gates pass for every shipped/example profile; no unknown-license
   model is accepted.
 - README accurately documents architecture, privacy, limits, and CLI.
-

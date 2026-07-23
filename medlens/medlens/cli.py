@@ -1,111 +1,208 @@
 # -*- coding: utf-8 -*-
-"""Typer CLI for MEDLENS.
+"""Typer CLI for the deterministic MEDLENS flagging milestone."""
 
-Commands:
-    review    run the agent on a (synthetic) lab-report scan
-    check     verify the LLM endpoint is reachable
-    sample    (re)generate the synthetic sample scan
-    selftest  run the whole agent loop offline (no model / no network)
-"""
+from __future__ import annotations
 
-import os
-import sys
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 
 import typer
 
-from . import providers, feedback, labtools, config, picker
-from .config import DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_API_KEY
+from . import config, feedback, labtools, providers
 from .agent import run_review
 
-app = typer.Typer(add_completion=False, no_args_is_help=True,
-                  help="MEDLENS — agentic, educational lab-report assistant (NOT clinical).")
+
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="MEDLENS — traceable generic lab-report extraction and flagging (not clinical).",
+)
 
 
-def _setup_logging(verbose, log_file=None):
+def _setup_logging(verbose: bool, log_file: str | None = None) -> None:
+    """Configure developer diagnostics; the run trace is written independently."""
     logger = logging.getLogger("medlens")
     logger.setLevel(logging.DEBUG)
     logger.handlers.clear()
     logger.propagate = False
     try:
-        from rich.logging import RichHandler
         from rich.console import Console
-        h = RichHandler(console=Console(stderr=True), show_path=False, markup=False)
+        from rich.logging import RichHandler
+
+        handler = RichHandler(
+            console=Console(stderr=True),
+            markup=False,
+            show_path=False,
+        )
     except Exception:
-        h = logging.StreamHandler()
-    h.setLevel(logging.DEBUG if verbose else logging.WARNING)
-    logger.addHandler(h)
+        handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    logger.addHandler(handler)
     if log_file:
-        fh = logging.FileHandler(log_file)
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        logger.addHandler(fh)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        logger.addHandler(file_handler)
 
 
-def _cfg(base_url, model, api_key, fake=False, max_tokens=8192,
-         no_reasoning=False, reasoning_effort=None, retries=3):
-    return {"base_url": base_url, "model": model, "api_key": api_key, "fake": fake,
-            "max_tokens": max_tokens, "no_reasoning": no_reasoning,
-            "reasoning_effort": reasoning_effort, "retries": retries}
+def _provider_cfg(
+    base_url: str,
+    model: str,
+    api_key: str,
+    *,
+    retries: int = 3,
+) -> dict:
+    """Legacy endpoint configuration used only by ``check`` and ``models``."""
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": model,
+        "retries": retries,
+    }
 
 
-def _ensure_sample():
-    if not os.path.exists(labtools.SAMPLE_IMG) and not os.path.exists(labtools.SAMPLE_TXT):
-        labtools.generate_synthetic_report()
-    return labtools.SAMPLE_IMG if os.path.exists(labtools.SAMPLE_IMG) else labtools.SAMPLE_TXT
+def _ensure_sample() -> str:
+    if os.path.exists(labtools.SAMPLE_IMG) and os.path.exists(labtools.SAMPLE_TXT):
+        return labtools.SAMPLE_IMG
+    if os.path.exists(labtools.SAMPLE_TXT):
+        return labtools.SAMPLE_TXT
+    if os.path.exists(labtools.BUNDLED_SAMPLE_TXT):
+        return labtools.BUNDLED_SAMPLE_TXT
+    generated_text = str(Path.cwd() / "sample_lab_report.txt")
+    labtools.generate_synthetic_report(
+        str(Path.cwd() / "sample_lab_report.png"),
+        generated_text,
+    )
+    return generated_text
 
 
 @app.command()
 def review(
-    input: Optional[str] = typer.Option(None, "--input", help="path to a SYNTHETIC scan; default: sample"),
-    provider: Optional[str] = typer.Option(None, "--provider",
-                                           help="openrouter|ollama|groq — preset base-url + key env. "
-                                                "Omit (on a TTY) to be prompted."),
-    base_url: Optional[str] = typer.Option(None, "--base-url",
-                                           help="OpenAI-compatible endpoint (overrides --provider)"),
-    model: Optional[str] = typer.Option(None, "--model",
-                                        help="model id, or shorthand 'qwen'/'nemotron'"),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="API key (ignored by Ollama)"),
-    no_pick: bool = typer.Option(False, "--no-pick",
-                                 help="skip the interactive provider/model prompt (use defaults)"),
-    out: Optional[str] = typer.Option(None, "--out", help="report path (default lab_report_review.md)"),
-    max_steps: int = typer.Option(8, "--max-steps", help="max agent turns"),
-    max_tokens: int = typer.Option(8192, "--max-tokens",
-                                   help="per-turn token budget (bump for reasoning models)"),
-    no_reasoning: bool = typer.Option(False, "--no-reasoning",
-                                      help="OpenRouter: suppress the <think>…</think> reasoning "
-                                           "trace so the structured tool_call actually arrives"),
-    reasoning_effort: Optional[str] = typer.Option(None, "--reasoning-effort",
-                                                   help="OpenRouter: 'low'|'medium'|'high' "
-                                                        "(alternative to --no-reasoning)"),
-    retries: int = typer.Option(3, "--retries",
-                                help="retry transient 5xx/502/503/504 gateway errors"),
+    input: Optional[str] = typer.Option(
+        None,
+        "--input",
+        help="Lab report: text/Markdown/CSV/TSV, image, or PDF; defaults to the synthetic sample.",
+    ),
+    transcript: Optional[str] = typer.Option(
+        None,
+        "--transcript",
+        help="Optional text transcript for an image/PDF. A same-stem transcript is detected automatically.",
+    ),
+    report_type: Optional[str] = typer.Option(
+        None,
+        "--report-type",
+        help="User-specified report/panel type. If omitted, use a document label or safe deterministic inference.",
+    ),
+    runs_dir: str = typer.Option(
+        config.DEFAULT_RUNS_DIR,
+        "--runs-dir",
+        help="Parent directory for immutable per-run artefact folders.",
+    ),
+    run_id: Optional[str] = typer.Option(
+        None,
+        "--run-id",
+        help="Optional reproducible run-directory name; must not already exist.",
+    ),
+    report: bool = typer.Option(
+        True,
+        "--report/--no-report",
+        help="Write or suppress the human-readable Markdown flagging report.",
+    ),
+    out: Optional[str] = typer.Option(
+        None,
+        "--out",
+        help="Optional explicit Markdown report path; implies --report.",
+    ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Equivalent to DEBUG=true for this process; logs full observable I/O after secret redaction.",
+    ),
     quiet: bool = typer.Option(False, "--quiet"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="show debug logs"),
-    log_file: Optional[str] = typer.Option(None, "--log-file"),
-):
-    """Run the agent: it extracts, flags deterministically, reasons (bounded), and saves."""
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    log_file: Optional[str] = typer.Option(
+        None,
+        "--log-file",
+        help="Optional developer log. The detailed events.jsonl trace is always written.",
+    ),
+) -> None:
+    """Execute extraction and deterministic flagging, then stop before research."""
+    if out and not report:
+        raise typer.BadParameter("--out cannot be combined with --no-report")
+    if debug:
+        os.environ["DEBUG"] = "true"
     feedback.configure(quiet=quiet)
     _setup_logging(verbose, log_file)
-    input_path = input or _ensure_sample()
-    out_path = out or labtools.DEFAULT_OUT
+    result = run_review(
+        {},
+        input or _ensure_sample(),
+        out_path=out,
+        transcript_path=transcript,
+        report_type=report_type,
+        runs_dir=runs_dir,
+        run_id=run_id,
+        write_report=report,
+    )
+    if not result.get("ok"):
+        if quiet:
+            typer.echo(json.dumps(result, indent=2, sort_keys=True))
+        raise typer.Exit(1)
+    if quiet:
+        typer.echo(json.dumps(result, indent=2, sort_keys=True))
 
-    # Resolve the gateway + model. Prompt only when the user pinned nothing on the
-    # command line AND we're on an interactive terminal; otherwise resolve defaults.
-    nothing_specified = not any((provider, base_url, model))
-    if nothing_specified and not no_pick and sys.stdin.isatty():
-        provider, base_url, model, api_key = picker.pick()
-    else:
-        provider, base_url, model, api_key = config.resolve_endpoint(
-            provider, base_url, model, api_key)
-        feedback.note("provider=%s  model=%s  base_url=%s" % (provider, model, base_url))
 
-    run_review(_cfg(base_url, model, api_key, max_tokens=max_tokens,
-                    no_reasoning=no_reasoning, reasoning_effort=reasoning_effort,
-                    retries=retries),
-               input_path, out_path, max_steps=max_steps)
+@app.command()
+def sample(
+    image_out: str = typer.Option(labtools.SAMPLE_IMG, "--image-out"),
+    text_out: str = typer.Option(labtools.SAMPLE_TXT, "--text-out"),
+) -> None:
+    """Generate the synthetic FBC example image and transcript."""
+    image, text = labtools.generate_synthetic_report(image_out, text_out)
+    typer.echo("wrote %s" % text)
+    if image:
+        typer.echo("wrote %s" % image)
+
+
+@app.command()
+def selftest(
+    runs_dir: str = typer.Option("runs", "--runs-dir"),
+    run_id: Optional[str] = typer.Option(None, "--run-id"),
+    debug: bool = typer.Option(False, "--debug"),
+    quiet: bool = typer.Option(False, "--quiet"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Run the complete milestone offline with no model, key, or network."""
+    if debug:
+        os.environ["DEBUG"] = "true"
+    feedback.configure(quiet=quiet)
+    _setup_logging(verbose)
+    result = run_review(
+        {},
+        _ensure_sample(),
+        runs_dir=runs_dir,
+        run_id=run_id,
+        write_report=True,
+    )
+    if not result.get("ok"):
+        typer.echo(json.dumps(result, indent=2, sort_keys=True))
+        raise typer.Exit(1)
+    required = ("extracted_results", "flagged_results", "manifest", "report", "trace")
+    missing = [
+        name
+        for name in required
+        if not result["artifacts"].get(name)
+        or not Path(result["artifacts"][name]).is_file()
+    ]
+    if missing:
+        typer.echo("selftest missing artefacts: %s" % ", ".join(missing))
+        raise typer.Exit(1)
+    if quiet:
+        typer.echo(json.dumps(result, indent=2, sort_keys=True))
 
 
 @app.command()
@@ -115,18 +212,16 @@ def check(
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
-):
-    """Check the LLM endpoint is reachable, then exit."""
+) -> None:
+    """Check a future model endpoint; ``review`` does not use it in this milestone."""
     _setup_logging(verbose)
-    provider, base_url, model, api_key = config.resolve_endpoint(provider, base_url, model, api_key)
-    info = providers.check(_cfg(base_url, model, api_key))
+    _, resolved_url, resolved_model, resolved_key = config.resolve_endpoint(
+        provider, base_url, model, api_key
+    )
+    info = providers.check(_provider_cfg(resolved_url, resolved_model, resolved_key))
     typer.echo(json.dumps(info, indent=2))
     if info.get("ok"):
-        typer.secho("\nendpoint reachable at %s" % info["base_url"], fg=typer.colors.GREEN)
         raise typer.Exit(0)
-    typer.secho("\ncheck failed: %s" % info.get("error"), fg=typer.colors.RED)
-    if info.get("hint"):
-        typer.echo(info["hint"])
     raise typer.Exit(1)
 
 
@@ -135,49 +230,32 @@ def models(
     provider: Optional[str] = typer.Option(None, "--provider", help="openrouter|ollama|groq"),
     base_url: Optional[str] = typer.Option(None, "--base-url"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
-    filter: Optional[str] = typer.Option(None, "--filter", help="only ids containing this substring"),
-    free: bool = typer.Option(False, "--free", help="only free models"),
-    tools: bool = typer.Option(False, "--tools", help="only tool-calling models (needed for the agent)"),
-):
-    """List models the endpoint offers (use --free --tools to find a usable one)."""
-    _, base_url, _, api_key = config.resolve_endpoint(provider, base_url, None, api_key)
-    info = providers.list_models(_cfg(base_url, model="", api_key=api_key),
-                                 name_filter=filter, free_only=free, tools_only=tools)
+    filter: Optional[str] = typer.Option(None, "--filter"),
+    free: bool = typer.Option(False, "--free"),
+    tools: bool = typer.Option(False, "--tools"),
+) -> None:
+    """List a future endpoint catalogue; selection does not affect ``review``."""
+    _, resolved_url, _, resolved_key = config.resolve_endpoint(
+        provider, base_url, None, api_key
+    )
+    info = providers.list_models(
+        _provider_cfg(resolved_url, model="", api_key=resolved_key),
+        name_filter=filter,
+        free_only=free,
+        tools_only=tools,
+    )
     if not info.get("ok"):
-        typer.secho("could not list models: %s" % info.get("error"), fg=typer.colors.RED)
+        typer.echo("could not list models: %s" % info.get("error"))
         raise typer.Exit(1)
-    typer.secho("models (%d):" % info["count"], fg=typer.colors.CYAN)
-    for m in info["models"]:
-        tags = (["free"] if m["is_free"] else []) + (["tools"] if m["supports_tools"] else ["no-tools"])
-        typer.echo("  %-55s %s" % (m["id"], ",".join(tags)))
-    if info["count"] == 0:
-        typer.echo("  (none matched — loosen the filters)")
+    typer.echo("models (%d):" % info["count"])
+    for item in info["models"]:
+        tags = (["free"] if item["is_free"] else []) + (
+            ["tools"] if item["supports_tools"] else ["no-tools"]
+        )
+        typer.echo("  %-55s %s" % (item["id"], ",".join(tags)))
 
 
-@app.command()
-def sample():
-    """(Re)generate the synthetic sample scan + transcript."""
-    img, txt = labtools.generate_synthetic_report()
-    typer.echo("wrote %s  +  %s" % (img, txt))
-
-
-@app.command()
-def selftest(
-    out: Optional[str] = typer.Option(None, "--out"),
-    quiet: bool = typer.Option(False, "--quiet"),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
-):
-    """Run the full agent loop offline with a fake model (no network/key needed)."""
-    from .fake import make_fake_provider
-    feedback.configure(quiet=quiet)
-    _setup_logging(verbose)
-    providers.set_fake_provider(make_fake_provider())
-    input_path = _ensure_sample()
-    out_path = out or labtools.DEFAULT_OUT
-    run_review(_cfg("(offline)", "(fake)", "(none)", fake=True), input_path, out_path)
-
-
-def main():
+def main() -> None:
     app()
 
 

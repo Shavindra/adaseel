@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Static configuration: the disclaimer, vendor-agnostic LLM defaults, and the
-agent's system prompt (which encodes the workflow + the safety guardrails)."""
+"""Shared configuration for the deterministic milestone and future endpoints."""
 
 import os
 
@@ -46,6 +45,8 @@ def load_dotenv():
 
 
 load_dotenv()
+
+DEFAULT_RUNS_DIR = os.environ.get("MEDLENS_RUNS_DIR", "runs")
 
 # Printed at the top (and bottom) of every report and at the start of every run.
 # Verbatim and non-negotiable — this keeps the prototype honestly scoped.
