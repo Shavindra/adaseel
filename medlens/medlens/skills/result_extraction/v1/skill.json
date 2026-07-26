@@ -1,0 +1,9 @@
+{
+  "allows_empty": false,
+  "input_contract": "ResultExtractionInput/v1",
+  "max_input_chars": 30000,
+  "output_contract": "ResultExtractionOutput/v1",
+  "output_name": "submit_extracted_results",
+  "role": "result_extraction",
+  "skill_id": "result_extraction/v1"
+}

@@ -1,0 +1,9 @@
+{
+  "allows_empty": false,
+  "input_contract": "ReportClassificationInput/v1",
+  "max_input_chars": 30000,
+  "output_contract": "ReportClassificationOutput/v1",
+  "output_name": "submit_report_classification",
+  "role": "report_classification",
+  "skill_id": "report_classification/v1"
+}

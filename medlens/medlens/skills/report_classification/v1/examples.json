@@ -1,0 +1,21 @@
+[
+  {
+    "input": {
+      "source_text": "Report type: Urinalysis\npH 6.0 4.5-8.0",
+      "user_report_type": null
+    },
+    "output": {
+      "decision": {
+        "report_type": "Urinalysis",
+        "source": "document_evidence",
+        "evidence": ["Report type: Urinalysis"]
+      },
+      "journal": {
+        "rationale": "The report explicitly labels its type.",
+        "alternatives_considered": ["unresolved"],
+        "assumptions": [],
+        "uncertainties": []
+      }
+    }
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "input": {
+      "report_type": "Urinalysis",
+      "source_text": "pH | 6.0 | | 4.5-8.0 |"
+    },
+    "output": {
+      "results": [
+        {
+          "test_name": "pH",
+          "value": "6.0",
+          "unit": "",
+          "reference_range": "4.5-8.0",
+          "reported_flag": ""
+        }
+      ],
+      "journal": {
+        "rationale": "One complete result row was visible.",
+        "alternatives_considered": [],
+        "assumptions": ["The row delimiters identify one result."],
+        "uncertainties": []
+      }
+    }
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "input": {
+      "results": [
+        {
+          "result_id": "R0001",
+          "test_name": "Marker",
+          "value": "9.8",
+          "reference_range": "2.0-8.0"
+        }
+      ]
+    },
+    "output": {
+      "assessments": [
+        {
+          "result_id": "R0001",
+          "flag": "high",
+          "reason_code": "value_above_interval",
+          "rationale": "The value is above the supplied upper bound."
+        }
+      ],
+      "journal": {
+        "rationale": "The supplied interval supports one numeric comparison.",
+        "alternatives_considered": ["low", "normal", "cannot_assess"],
+        "assumptions": ["The printed interval belongs to this row."],
+        "uncertainties": []
+      }
+    }
+  }
+]

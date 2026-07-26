@@ -1,0 +1,25 @@
+[
+  {
+    "input": {
+      "canonical_results": [{"result_id": "R0001", "test_name": "pH"}],
+      "comparison": [{"result_id": "R0001", "status": "exact_match"}]
+    },
+    "output": {
+      "overall_status": "supported",
+      "reviews": [
+        {
+          "result_id": "R0001",
+          "verdict": "supported",
+          "issue_codes": [],
+          "rationale": "The extraction artefact matches the canonical row."
+        }
+      ],
+      "journal": {
+        "rationale": "All supplied rows matched.",
+        "alternatives_considered": ["disputed", "insufficient"],
+        "assumptions": [],
+        "uncertainties": []
+      }
+    }
+  }
+]

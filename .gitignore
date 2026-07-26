@@ -217,5 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# MEDLENS: live report output is regenerated each run
+# MEDLENS: generated run bundles and local diagnostics may contain source data.
+runs/
+medlens/runs/
+*.debug.log
+debug.jsonl
 medlens/lab_report_review.md
+medlens/flagging_report.md
