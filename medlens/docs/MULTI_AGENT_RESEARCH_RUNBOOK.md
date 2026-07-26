@@ -4,6 +4,69 @@
 
 Extend MEDLENS from a three-tool demo into a controlled, evidence-backed lab-report research workflow.
 
+### Current milestone — bounded multi-agent execution through flagging
+
+The `codex/execute-plan-up-to-flagging-results` branch implements the first bounded
+multi-agent segment:
+
+```text
+canonical ingestion baseline
+  -> ReportClassificationAgent
+  -> ResultExtractionAgent
+  -> ResultValidationAgent
+  -> ResultFlaggingAgent
+  -> deterministic reconciliation
+  -> stop before research
+```
+
+These are specialised model-backed roles, not one free-running model and not
+free-form assistant turns. Each role has:
+
+- A versioned, hashed skill.
+- A versioned input template.
+- A strict structured output schema with `additionalProperties: false`.
+- An independently selectable provider and model.
+- At most one correction for malformed output.
+- An invocation record and explicit hand-off to the next role.
+
+The role artefacts are meaningful pipeline outputs, but they do not bypass the
+runbook's safety authorities. Deterministic parsing establishes canonical source
+rows; structural validators reconcile the extraction and validation artefacts; and
+`flag_results()` independently calculates the accepted high/low/normal category.
+Disagreement is recorded and rejected rather than silently changing canonical data.
+Agent failure degrades visibly to the deterministic result bundle.
+
+The report-classification role is generic: a laboratory report may be a blood panel,
+urinalysis, pathology report, environmental assay, molecular report, or another
+type supported by the supplied text. An optional user-specified report type takes
+precedence. Unsupported classification remains unresolved rather than being forced
+into a fixed taxonomy.
+
+Every run writes canonical extraction, agent extraction comparison, per-result
+validation, agent flagging assessment, deterministic reconciliation, agent outputs,
+invocations, hand-offs, ordered JSONL events, a matching human-readable `run.log`,
+and a manifest. A Markdown flagging view is optional. Both logs carry the same event
+IDs, statuses, reason codes, and redacted event details. `DEBUG=true` adds full
+observable model/tool inputs and outputs, OCR/transcript text, exact values, local
+paths, structured responses, errors, and stack traces to both local logs after
+recursive secret redaction. Run/debug outputs are gitignored.
+
+Every run records safe per-role configuration provenance: provider, exact model,
+credential-free endpoint, retry/timeouts, and whether a key is required/present plus
+the environment/argument source. It never records key material or a key fingerprint.
+Known hosted providers without credentials fail preflight before provider I/O.
+`--verbose` displays that configuration and each bounded provider attempt live.
+Connection/read timeouts, connection, proxy, TLS, authentication, permission,
+rate-limit, HTTP, and response-shape failures use stable typed codes and actionable
+hints. Agent failure still produces the deterministic bundle, but the run is marked
+degraded and the CLI returns a distinct non-zero status.
+
+Hidden chain-of-thought remains excluded in every mode. Explainability uses the
+structured journal required from every role—explicit rationale, assumptions,
+alternatives, uncertainty, validator results, hashes, and stable reason codes.
+Provider hidden-reasoning fields may be represented only by presence/length/hash
+diagnostics.
+
 The implementation must:
 
 - Preserve deterministic extraction and high/low flagging.
@@ -45,9 +108,11 @@ reasoning.
 
 Use a bounded multi-agent workflow, not an open-ended agent swarm.
 
-The current workflow is linear and safety-sensitive. Extraction, arithmetic, query
+The workflow is linear and safety-sensitive. Extraction, arithmetic, query
 templating, HTTP search, citation checking, claim acceptance, and report writing must
-remain deterministic Python. LLM roles perform only bounded language tasks:
+remain deterministically validated Python operations. Current pre-research language
+roles perform bounded classification, extraction, validation, and flagging
+assessments through the templates above. Subsequent research roles are:
 
 1. `QueryExpansionAgent` (optional): propose additional search phrases inside a
    deterministic query grammar. The default plan is built without a model.
@@ -111,7 +176,10 @@ These are different concepts. Do not merge them.
 - **Decision trace:** machine-readable record explaining how each claim moved from
   proposed to accepted/rejected/omitted.
 
-Do not make OCR or numeric flagging into agents. Do not expose unrestricted `fetch_url`, shell, filesystem, or general browser tools to any model.
+Do not give OCR execution or numeric range arithmetic to a model. The
+`ResultFlaggingAgent` emits a typed assessment, while `flag_results()` remains the
+only acceptance authority. Do not expose unrestricted `fetch_url`, shell, filesystem,
+or general browser tools to any model.
 
 ## Open-model policy
 
@@ -175,6 +243,10 @@ medlens/
   agents.py                bounded role runners and verifier consensus
   skills/
     registry.py            versioned skill loading and hashing
+    report_classification/v1/ skill.json, system.md, examples.json
+    result_extraction/v1/     skill.json, system.md, examples.json
+    result_validation/v1/     skill.json, system.md, examples.json
+    result_flagging/v1/       skill.json, system.md, examples.json
     query_expansion/v1/    skill.json, system.md, examples.json
     evidence_synthesis/v1/ skill.json, system.md, examples.json
     evidence_verification/v1/ skill.json, system.md, examples.json
@@ -2114,4 +2186,3 @@ All five TODOs are complete only when:
 - Role qualification gates pass for every shipped/example profile; no unknown-license
   model is accepted.
 - README accurately documents architecture, privacy, limits, and CLI.
-

@@ -1,0 +1,6 @@
+Report type: Renal profile
+Test,Result,Unit,Reference Range,Flag
+Sodium,141,mmol/L,135-145,
+Potassium,5.8,mmol/L,3.5-5.1,H
+Creatinine,89,umol/L,60-110,
+Estimated GFR,>90,mL/min/1.73m2,>=60,

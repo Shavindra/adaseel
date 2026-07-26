@@ -3,132 +3,290 @@
 > **EDUCATIONAL PROTOTYPE — NOT FOR CLINICAL USE. Not a medical device. Outputs are
 > unverified and may be wrong. Consult a qualified clinician.**
 
-An **agentic** medical lab-report assistant, built as a research / educational
-prototype — the same shape as [adaseli](../README.md): an LLM **agent drives the
-work by selecting and calling tools**, rather than a hardwired pipeline.
+MEDLENS is a bounded multi-agent laboratory-report workflow. This branch executes the
+research runbook through accepted result flagging and then stops:
 
-## Scope & safety (built in, not bolted on)
+```text
+canonical ingestion baseline
+  -> report classification agent
+  -> result extraction agent
+  -> result validation agent
+  -> result flagging agent
+  -> deterministic reconciliation
+  -> run bundle
+```
 
-- **Synthetic data only.** Ships a synthetic sample report; never reads, requests,
-  or stores real patient data.
-- **Decision-support, not diagnosis.** The agent produces *possibilities to discuss
-  with a clinician*, with explicit uncertainty.
-- **Human-in-the-loop.** Every reasoning output is an **unverified draft** for a
-  qualified clinician; the report is structured to make that obvious.
-- **Prominent disclaimer** leads (and closes) every report and every run.
-- **Local-capable.** OCR runs locally; the reasoning model is vendor-agnostic —
-  default is OpenRouter, but point `--base-url` at a local Ollama to keep
-  everything on-machine.
+It is neither the previous free-running single-agent loop nor a deterministic parser
+presented as the complete system. Four model-backed specialist roles exchange
+versioned structured artefacts through explicit hand-offs. Deterministic parsing,
+schema validation, field comparison, and reference-range arithmetic remain the final
+safety gates.
 
-## Agentic design (and why it's still safe)
+Evidence research, condition categories, interpretation, medical claims, and the
+final research report are intentionally not implemented on this branch.
 
-The agent is given three **tools** and decides when to call them — it is not a
-fixed sequence:
+## Agent contracts
 
-| Tool | What it does | Who computes it |
+Every role has a versioned, hashed skill; a fixed input template; a strict output
+schema; and a named forced-output tool. Unknown fields, missing fields, malformed
+types, invalid enums, duplicate result IDs, and incomplete result-ID coverage are
+rejected.
+
+| Role | Required structured output | Deterministic acceptance |
 | --- | --- | --- |
-| `extract_lab_report` | OCR the scan → structured results | Docling + Surya (local) |
-| `flag_results` | mark each value high/low/normal vs the **printed** range | **deterministic Python — no LLM** |
-| `save_report` | write the Markdown report | template + the agent's bounded text |
+| `report_classification` | Type, source, exact evidence, decision journal | User type takes precedence; unsupported evidence falls back safely |
+| `result_extraction` | Exact test/value/unit/range/reported-flag rows, journal | Compared field-by-field with canonical deterministic rows |
+| `result_validation` | One verdict, issue-code list, and rationale per result ID | Exact ID coverage and structural checks are authoritative |
+| `result_flagging` | One bounded category, reason code, and rationale per result ID | `flag_results()` independently calculates and accepts/rejects each category |
 
-The safety-critical parts are **tools, not model output**:
+Each decision journal uses the same required template:
 
-- The extracted values are **cached server-side** (in a shared `ctx`), so the model
-  can't pass in or alter numbers — `flag_results` flags the *cached* rows.
-- High/low/normal is pure arithmetic in `flag_results`; the system prompt forbids
-  the agent from judging abnormalities itself or inventing a reference range. A
-  missing range becomes `cannot_assess — no range provided`, never a guess.
-- The report's tables and flags are rebuilt from the cached deterministic data; the
-  LLM only contributes the bounded **considerations** text.
+```json
+{
+  "rationale": "Concise explicit rationale",
+  "alternatives_considered": ["..."],
+  "assumptions": ["..."],
+  "uncertainties": ["..."]
+}
+```
 
-This mirrors adaseli, where deterministic work (`compute_hydrophobicity`) is a tool
-and values are cached so the agent orchestrates without tampering.
+There is no unstructured assistant text in the accepted pipeline state. A malformed
+artefact receives at most one correction attempt. A transport or agent failure is
+recorded and degrades to deterministic results rather than inventing data.
+
+## Generic report handling
+
+MEDLENS is not blood-test-specific. A report may be a urinalysis, pathology report,
+molecular assay, environmental laboratory report, blood panel, or another
+laboratory-report type supported by its content.
+
+Type precedence is:
+
+1. Explicit `--report-type`.
+2. A contract-valid classification-agent output grounded in exact report evidence.
+3. A document label or conservative deterministic signature.
+4. `Unspecified laboratory report`.
+
+Report type is context only. It never changes the reference-range calculation.
+
+Supported inputs:
+
+- Native `.txt`, `.md`, `.csv`, and `.tsv`.
+- Images and PDFs through optional local Docling/Surya OCR.
+- Images and PDFs with an explicit `--transcript`.
+- Images and PDFs with an automatically detected same-stem transcript.
+
+MEDLENS never substitutes its bundled example transcript for an unrelated input.
 
 ## Install
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-`requests`, `pillow`, `typer`, `rich` are enough to run the agent end-to-end via the
-transcript fallback. Add `docling` + `surya-ocr` for real OCR (heavy; downloads
-models on first use).
+For local image/PDF OCR:
+
+```bash
+python -m pip install -e ".[ocr]"
+```
+
+## Select providers and models
+
+The four roles can share one OpenAI-compatible runtime:
+
+```bash
+python -m medlens review \
+  --input examples/reports/renal_profile.csv \
+  --provider ollama \
+  --model qwen
+```
+
+Or each role can use a different provider/model:
+
+```bash
+python -m medlens review \
+  --input examples/reports/renal_profile.csv \
+  --provider ollama \
+  --model qwen \
+  --agent-provider report_classification=groq \
+  --agent-model report_classification=qwen \
+  --agent-model result_extraction=extractor-model-id \
+  --agent-model result_validation=validator-model-id \
+  --agent-model result_flagging=flagger-model-id
+```
+
+Repeatable override options are:
+
+- `--agent-provider ROLE=PROVIDER`
+- `--agent-model ROLE=MODEL_ID`
+- `--agent-base-url ROLE=URL`
+
+When run interactively without explicit runtime options, the CLI offers a shared
+provider/model picker and optional per-role overrides. Use `--no-pick` for scripts.
+
+Provider credentials are read from `OPENROUTER_API_KEY`, `GROQ_API_KEY`,
+`MEDLENS_API_KEY`, or `OPENAI_API_KEY` as appropriate. A local Ollama endpoint does
+not require a key. OpenRouter defaults to the free, tool-capable `nemotron` preset;
+its `qwen` shorthand resolves to the current paid tool-capable route because no free
+Qwen route is currently present in OpenRouter's API catalogue.
+
+Use `--verbose` to confirm the resolved provider, model, safe endpoint, retry and
+timeout settings, and API-key status/source for every role:
+
+```bash
+python -m medlens review \
+  --input examples/reports/renal_profile.csv \
+  --no-pick \
+  --verbose
+```
+
+The display reports `present`, `missing`, `not required`, or an unknown custom
+endpoint requirement. It identifies whether configuration came from an explicit
+argument, a role/global environment variable, a `.env` file, or a provider preset.
+It never prints, hashes, truncates, or reveals any part of a key. Known hosted
+providers with a missing key fail preflight before provider I/O.
+
+Hosted agent endpoints receive the synthetic report text and structured result rows.
+Open model weights do not make a hosted endpoint private. Do not use identifiable
+clinical data.
 
 ## Run
 
 ```bash
-# Run with NO flags on a terminal and MEDLENS prompts you for the gateway
-# (OpenRouter / Groq) and then the model (Qwen / Nemotron / paste an id):
-export OPENROUTER_API_KEY=sk-or-v1-...           # OpenRouter key, OR…
-export GROQ_API_KEY=gsk_...                      # …a Groq key
-python -m medlens review                         # → interactive provider/model prompt
+# Four agents with the configured/default runtime
+python -m medlens review \
+  --input examples/reports/renal_profile.csv \
+  --no-pick
 
-# Or pin it non-interactively. --provider sets the base-url + key env; --model
-# accepts the shorthands 'qwen'/'nemotron' or any full id:
-python -m medlens review --provider openrouter --model nemotron
-python -m medlens review --provider openrouter --model qwen
-python -m medlens review --provider groq       --model qwen   # Groq has no Nemotron
-python -m medlens review --no-pick               # skip the prompt, use defaults
+# User type remains authoritative
+python -m medlens review \
+  --input examples/reports/urinalysis.txt \
+  --report-type "Urinalysis" \
+  --no-pick
 
-# Optional: list a provider's models so YOU can pick one that supports tool calling
-python -m medlens models --provider groq --tools
-python -m medlens models --provider openrouter --free --tools
+# Machine-readable bundle only
+python -m medlens review \
+  --input examples/reports/urinalysis.txt \
+  --no-report \
+  --no-pick
 
-# Check the endpoint is reachable
-python -m medlens check --provider groq
+# Full observable local diagnostic trace
+DEBUG=true python -m medlens review \
+  --input examples/reports/renal_profile.csv \
+  --verbose \
+  --no-pick
 
-# Fully local via Ollama (pick a tool-calling model)
-python -m medlens review --base-url http://localhost:11434/v1 --model qwen2.5
-
-# Run the whole agent loop OFFLINE (no model/key) — uses a scripted fake model
-python -m medlens selftest -v
-
-# (Re)generate the synthetic sample scan
-python -m medlens sample
+# All four agents offline with contract-valid fakes
+python -m medlens selftest --quiet
 ```
 
-> You choose the model; MEDLENS never picks or switches it. The agent does need a
-> model whose endpoint supports **tool calling** — if the one you pick returns no
-> tool calls, MEDLENS says so (add `-v` for the raw response) and the `models
-> --free --tools` command lists candidates, but the choice stays yours.
+All checked-in inputs and commands are under [`examples/`](examples/).
 
-The run streams the agent's tool calls (with a spinner) and writes
-**`lab_report_review.md`** (disclaimer header, extracted results, deterministic
-flagged abnormalities, bounded considerations, limitations & coverage). See
-`example_lab_report_review.md` for a saved example.
+## Run bundle
 
-## Package layout
+Every execution creates `runs/<run-id>/` unless `--runs-dir` changes the parent.
+Existing run directories are never overwritten.
 
-```
-medlens/
-  medlens/
-    config.py     disclaimer, defaults, the agent system prompt (workflow + safety)
-    feedback.py   rich spinner + per-tool status
-    labtools.py   OCR extract, deterministic flagging, sample, report assembly
-    tools.py      agent-facing tools (schemas + dispatcher; caches values in ctx)
-    providers.py  vendor-agnostic OpenAI-compatible tool-calling client + fake
-    agent.py      the tool-calling agent loop
-    cli.py        Typer CLI (review / check / sample / selftest)
-  sample_lab_report.png / .txt     synthetic FBC scan + OCR-equivalent transcript
-  example_lab_report_review.md     a saved example run
-```
-
-## Configuration
-
-| Flag / env | Purpose | Default |
+| Artefact | Always | Purpose |
 | --- | --- | --- |
-| `--provider` | `openrouter` \| `groq` — preset base-url + key env + model shorthands | prompt (or `openrouter`) |
-| `--base-url` / `MEDLENS_BASE_URL` | OpenAI-compatible endpoint (overrides `--provider`) | `https://openrouter.ai/api/v1` |
-| `--model` / `MEDLENS_MODEL` | model id, or shorthand `qwen` / `nemotron` (needs tool calling) | `nvidia/nemotron-nano-9b-v2:free` |
-| `--api-key` / `MEDLENS_API_KEY` | API key | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` |
-| `--no-pick` | skip the interactive provider/model prompt | off |
-| `--input` | path to a synthetic scan | the bundled sample |
-| `--out` | report output path | `lab_report_review.md` |
+| `extracted_results.json` | yes | Canonical rows, classification, agent extraction, and field comparison |
+| `validated_results.json` | yes | Per-result structured validation and deterministic canonical state |
+| `flagged_results.json` | yes | Agent assessments, deterministic flags, reconciliation, and counts |
+| `agent_outputs.json` | yes | Exact contract-valid output artefact or failure for every role |
+| `agent_invocations.json` | yes | Role, skill/model/provider, attempts, hashes, status, validation codes, timing, token usage, and journals |
+| `handoffs.json` | yes | Five explicit inter-stage hand-offs and their input/output hashes |
+| `events.jsonl` | yes | Ordered tool/agent actions, decisions, failures, timings, and artefact hashes |
+| `run.log` | yes | Multi-line human-readable rendering of the same ordered, redacted event stream |
+| `manifest.json` | yes | Final status, role/runtime inventory, counts, limitations, and trace hash |
+| `flagging_report.md` | default | Optional human-readable flagging view; disable with `--no-report` |
 
-## Limitations
+## Explainability and debug mode
 
-- Not a clinical tool. The considerations are AI-generated, unverified, and may be
-  wrong; they exist to be checked by a qualified clinician.
-- OCR can misread scans; unreadable values are flagged, not guessed.
-- Only values with a printed reference range are assessed; others are reported as
-  `cannot_assess`, never compared against an assumed range.
+`run.log` is the primary reading view; `events.jsonl` is retained for parsers and
+analysis tools. Both are written incrementally and contain the same event IDs,
+statuses, reason codes, and redacted details. Normal events record:
+
+- Agent role, invocation/parent ID, provider, model, skill ID/hash, contract, and
+  named output tool.
+- Resolved per-role configuration, including API-key presence, requirement, and
+  source, but never key material.
+- Input/output hashes, attempts, validation codes, latency, and status.
+- Every hand-off and deterministic reconciliation outcome.
+- Per-result deterministic rationale and reason code.
+- Artefact hashes, limitations, and failure paths.
+
+`agent_invocations.json` retains each agent's explicit bounded decision journal.
+`agent_outputs.json` retains the complete structured role artefacts.
+
+`DEBUG=true` additionally records full observable model/tool inputs and outputs:
+system instructions, source/OCR/transcript text, exact values, schemas, structured
+responses, local paths, provider responses, errors, and stack traces. Credentials,
+tokens, cookies, private keys, and common secret patterns are recursively redacted.
+Generated runs and diagnostic logs are gitignored.
+
+## Provider failures
+
+Transport failures are returned as typed errors rather than raw request exceptions.
+Codes distinguish connection/read timeouts, connection, proxy and TLS failures,
+authentication/permission failures, rate limits, missing endpoints, transient
+provider errors, invalid JSON, and malformed provider responses.
+
+`--verbose` shows each provider attempt, endpoint host/port, configured timeouts,
+bounded back-off, final error, hint, and deterministic fallback status. For example,
+a failed connection to port 443 is recorded as `network_connect_timeout`, not an
+unlabelled `requests` traceback. `DEBUG=true` additionally records the redacted
+exception and stack trace in both run logs.
+
+Configure transport bounds with:
+
+```bash
+python -m medlens review \
+  --input examples/reports/renal_profile.csv \
+  --retries 3 \
+  --connect-timeout 15 \
+  --read-timeout 180 \
+  --verbose \
+  --no-pick
+```
+
+The deterministic bundle is still written when an agent is unavailable, but the run
+is marked `completed_to_flagging_degraded`; the CLI returns exit code `2` so scripts
+cannot mistake partial multi-agent execution for full success. Exit code `1`
+indicates a pipeline failure.
+
+Hidden chain-of-thought is not exposed or stored. Provider reasoning fields are
+discarded after presence/length/hash diagnostics. Reproducible explainability comes
+from the required structured journals, schemas, source comparisons, validation
+codes, deterministic rules, and hand-off hashes. See
+[`docs/EXPLAINABILITY.md`](docs/EXPLAINABILITY.md).
+
+## Verification
+
+```bash
+python -m unittest discover -s tests -v
+python -m medlens selftest --quiet
+python -m build --wheel --no-isolation
+```
+
+The ordinary suite and self-test use no network, key, OCR package, or live model.
+
+## Remaining research workflow
+
+The runbook stages after flagging remain pending:
+
+```text
+deterministic query plan
+  -> optional query expansion agent
+  -> PubMed/allowlisted search
+  -> evidence synthesis agent
+  -> deterministic claim validation
+  -> evidence verifier agents
+  -> deterministic claim decision
+  -> optional scientific safety critic
+  -> final research report and audit sidecar
+```
+
+See [`docs/MULTI_AGENT_RESEARCH_RUNBOOK.md`](docs/MULTI_AGENT_RESEARCH_RUNBOOK.md).

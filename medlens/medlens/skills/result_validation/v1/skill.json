@@ -1,0 +1,9 @@
+{
+  "allows_empty": false,
+  "input_contract": "ResultValidationInput/v1",
+  "max_input_chars": 30000,
+  "output_contract": "ResultValidationOutput/v1",
+  "output_name": "submit_result_validation",
+  "role": "result_validation",
+  "skill_id": "result_validation/v1"
+}

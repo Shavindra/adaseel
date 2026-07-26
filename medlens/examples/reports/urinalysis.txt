@@ -1,0 +1,11 @@
+Report type: Urinalysis
+
+| Test | Result | Unit | Reference Range | Flag |
+| --- | --- | --- | --- | --- |
+| pH | 6.0 |  | 4.5-8.0 |  |
+| Specific gravity | 1.028 |  | 1.005-1.030 |  |
+| Protein | Negative |  | Negative |  |
+| Glucose | Negative |  | Negative |  |
+
+This synthetic example demonstrates that qualitative findings are preserved but not
+forced through a numeric high/low rule.

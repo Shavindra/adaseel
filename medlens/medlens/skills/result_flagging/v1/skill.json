@@ -1,0 +1,9 @@
+{
+  "allows_empty": false,
+  "input_contract": "ResultFlaggingInput/v1",
+  "max_input_chars": 30000,
+  "output_contract": "ResultFlaggingOutput/v1",
+  "output_name": "submit_flagging_assessment",
+  "role": "result_flagging",
+  "skill_id": "result_flagging/v1"
+}

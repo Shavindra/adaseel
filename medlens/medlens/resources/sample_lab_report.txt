@@ -1,0 +1,16 @@
+# EDUCATIONAL PROTOTYPE — NOT FOR CLINICAL USE. Not a medical device. Outputs are unverified and may be wrong. Consult a qualified clinician.
+
+SYNTHETIC SAMPLE — Full Blood Count (FBC)   Patient: SAMPLE, Test (synthetic, not real)
+
+| Test | Result | Units | Reference Range | Flag |
+| --- | --- | --- | --- | --- |
+| Haemoglobin | 9.8 | g/dL | 13.0-17.0 | L |
+| Red Cell Count | 4.1 | 10^12/L | 4.5-5.9 | L |
+| Haematocrit | 0.31 | L/L | 0.40-0.54 | L |
+| Mean Cell Volume | 78 | fL | 80-100 | L |
+| White Cell Count | 12.6 | 10^9/L | 4.0-11.0 | H |
+| Neutrophils | 9.1 | 10^9/L | 2.0-7.5 | H |
+| Lymphocytes | 2.3 | 10^9/L | 1.0-4.0 |  |
+| Platelets | 178 | 10^9/L | 150-400 |  |
+| C-Reactive Protein | 48 | mg/L |  |  |
+| Ferritin | -- | ug/L | 30-400 |  |
